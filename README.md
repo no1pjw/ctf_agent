@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # ctf-agent
 
 Codex CLI에서 로컬 CTF 문제를 분야별 에이전트와 재현 가능한 절차로 분석하기 위한 작업 공간입니다.
@@ -64,3 +65,6 @@ ctf-export \
 ## 공개 전 확인
 
 `ctf-export --dry-run`으로 원본·출력·원격 저장소와 push 여부를 먼저 확인하세요. `--push`를 사용하기 전 공개본의 커밋과 파일 목록을 검토하는 것을 권장합니다.
+=======
+# ctf_agent
+>>>>>>> origin/main
