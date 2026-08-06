@@ -29,6 +29,7 @@ chmod +x \
   "$target_dir/references/tools/ctf-export.sh" \
   "$target_dir/references/tools/pwn-env-preflight.sh" \
   "$target_dir/references/tools/pwn-build.sh" \
+  "$target_dir/references/tools/pwn-cleanup.sh" \
   "$target_dir/references/tools/pwn-run.sh" \
   "$target_dir/references/tools/pwn-remote-run.sh" \
   "$target_dir/references/tools/pwn-triage.sh" \

@@ -8,6 +8,10 @@
 4. Build one primitive at a time and attempt at most two candidate exploits before Deep escalation.
 5. Avoid GDB until two cheaper tests fail or the exact offset/state remains genuinely ambiguous.
 
+When an official remote endpoint is recorded, switch to Fast-to-Remote as soon as one local exploit run derives a valid local flag. Run the remote solver before a second local success, negative control, P5, detailed evidence work, or write-up. A verified remote flag is the contest completion signal; perform only minimal private evidence saving and cleanup afterward. If the first remote attempt fails, return to the cheapest environment/protocol discriminator and permit one corrected retry.
+
+For a supplied Dockerfile, treat containers and the generated `ctf-<challenge>:local` image as run-scoped resources. The launcher invokes `pwn-cleanup.sh` after Codex exits, including failures and interruptions. Do not call broad prune commands or remove base images. Use `--keep-docker` only when the user explicitly needs post-run debugging.
+
 ## No Dockerfile
 
 If no Dockerfile and no matching cached image exist:
@@ -29,7 +33,7 @@ When a scanf/printf-family format has more conversions than supplied pointers/ar
 
 ## Escalation and verification
 
-Escalate for source absence, stripped/obfuscated binaries, heap/race/probabilistic behavior, environment mismatch, unresolved protocol/libc, two failed exploit trials, or budget exhaustion. Reuse Fast results. P4 executes two clean successes and one negative control; P5 verifies only that packet.
+Escalate for source absence, stripped/obfuscated binaries, heap/race/probabilistic behavior, environment mismatch, unresolved protocol/libc, two failed exploit trials, or budget exhaustion. Reuse Fast results. Without a remote endpoint, P4 executes two clean successes and one negative control; with one, Fast-to-Remote takes precedence and those controls are deferred until remote failure. P5 verifies only the existing packet.
 
 ## Official remote endpoint
 
@@ -37,7 +41,7 @@ When `scope/remote-target.env` records a user-declared official CTF endpoint:
 
 1. Complete local primitive and solver validation before target traffic.
 2. Parameterize `work/solve.py` with pwntools `REMOTE HOST=<host> PORT=<port>`; never hard-code a second endpoint. Exit nonzero when no valid flag is obtained so the bounded harness can distinguish failure.
-3. Run only through `pwn-remote-run.sh`, with one attempt by default and a second only after a bounded protocol/environment correction.
+3. Run only through `pwn-remote-run.sh`, with one immediate attempt by default and a second only after a bounded protocol/environment correction. Measure from remote solver start until the first validated `FLAG=` line with the harness monotonic timer.
 4. Do not scan ports, discover adjacent hosts, brute-force ASLR or credentials, persist a shell, pivot, or contact a scoreboard.
 5. Require `solve.py` to return the validated flag and print exactly `FLAG=<flag>` on stdout; never print that marker for an unvalidated candidate.
-6. Stop immediately after the minimum flag proof. Show `획득한 플래그: <flag>` immediately in the terminal and include the exact flag in the final user response. Save transcript and candidate flag under `evidence/private/`, while redacting it from `work/writeup.md`.
+6. Stop immediately after the minimum flag proof. Show `획득한 플래그: <flag>` and `원격 플래그 획득 시간: N.NNN초` immediately in the terminal and include both in the final user response. Save transcript and candidate flag under `evidence/private/`, while redacting it from `work/writeup.md`.

@@ -9,7 +9,7 @@
 - Use an independent parser/checker or reverse calculation only when it is cheap and materially resolves ambiguity.
 - If evidence is missing or inconsistent, return a precise bounded test request to P4. Never invent a replacement execution path.
 - Mark status as `candidate`, `verified`, or `rejected` with evidence.
-- For a verified flag obtained from an authorized CTF target, immediately display the exact value to the user as `획득한 플래그: <flag>` and include it in the final answer. This user-visible output is allowed even though public artifacts remain redacted.
+- Never delay a flag already obtained from an authorized remote CTF target. Preserve and repeat the harness output `획득한 플래그: <flag>` and `원격 플래그 획득 시간: N.NNN초` in the final answer. This user-visible output is allowed even though public artifacts remain redacted.
 
 ## Write-up
 

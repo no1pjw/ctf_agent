@@ -39,19 +39,43 @@ mkdir -p "$(dirname -- "$output_file")"
 chmod 600 "$output_file"
 
 status=1
+
+monotonic_ns() {
+  python3 -c 'import time; print(time.monotonic_ns())'
+}
+
+stream_remote_output() {
+  local start_ns=$1
+  local line now_ns elapsed_ms
+  local flag_printed=false
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    printf '%s\n' "$line"
+    if [[ "$flag_printed" == false && "$line" =~ ^FLAG=[^[:cntrl:]]+$ ]]; then
+      now_ns="$(monotonic_ns)"
+      elapsed_ms=$(( (now_ns - start_ns) / 1000000 ))
+      printf '\n획득한 플래그: %s\n' "${line#FLAG=}"
+      printf '원격 플래그 획득 시간: %d.%03d초\n' "$((elapsed_ms / 1000))" "$((elapsed_ms % 1000))"
+      flag_printed=true
+    fi
+  done
+}
+
 for ((attempt = 1; attempt <= attempts; attempt++)); do
   printf '=== remote attempt %d/%d: %s:%s ===\n' "$attempt" "$attempts" "$host" "$port" | tee -a "$output_file"
+  start_ns="$(monotonic_ns)"
   set +e
   timeout --foreground "$timeout_seconds" env \
     CTF_REMOTE_HOST="$host" CTF_REMOTE_PORT="$port" \
-    "$@" REMOTE "HOST=$host" "PORT=$port" 2>&1 | tee -a "$output_file"
+    "$@" REMOTE "HOST=$host" "PORT=$port" 2>&1 \
+    | stream_remote_output "$start_ns" \
+    | tee -a "$output_file"
   status=${PIPESTATUS[0]}
   set -e
   printf 'exit_status=%s\n' "$status" | tee -a "$output_file"
   flag_line="$(grep -aE '^FLAG=[^[:cntrl:]]+$' "$output_file" | tail -n 1 || true)"
   if [[ -n "$flag_line" ]]; then
     status=0
-    printf '\n획득한 플래그: %s\n' "${flag_line#FLAG=}"
     break
   fi
   if [[ $status -eq 0 ]]; then

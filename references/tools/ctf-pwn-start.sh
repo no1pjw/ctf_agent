@@ -14,6 +14,7 @@ usage() {
 옵션:
   --audit       입력 프롬프트, 역할 목록, TUI 로그 및 사용 내역 기록
   --rebuild     캐시 대신 문제 Docker 이미지 다시 빌드
+  --keep-docker 풀이 종료 후 문제 컨테이너와 이미지를 보존
   --dry-run     경로, 모드, 권한 및 생성 프롬프트만 표시
   --prepare-only  Codex 실행 없이 파일 복사 및 작업 디렉터리 준비
 
@@ -33,6 +34,7 @@ action=launch
 solve_mode=adaptive
 audit_enabled=false
 rebuild=false
+keep_docker=false
 challenge_name=
 remote_host=
 remote_port=
@@ -42,6 +44,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --audit) audit_enabled=true ;;
     --rebuild) rebuild=true ;;
+    --keep-docker) keep_docker=true ;;
     --fast-only) solve_mode=fast-only ;;
     --deep) solve_mode=deep ;;
     --dry-run) action=dry-run ;;
@@ -142,7 +145,7 @@ case "$solve_mode" in
     mode_prompt=$(cat <<'EOF'
 실행 모드는 ADAPTIVE다. P0-Lite에서 허가 범위, 파일 목록, 대상/빌드/런타임 네트워크 구분을 확인하고 P1은 이미 pwn으로 분류된 것으로 처리하라. 빠른 탐색은 약 10분, 주요 도구 호출 8회, 가설 3개, 익스플로잇 실패 2회로 제한한다. pwn-triage.sh는 한 번만 실행하고 사용 가능한 런타임이 있을 때만 캐시된 Docker 이미지를 재사용하라. 저비용 검사 2회가 실패하기 전에는 GDB를 사용하지 말고 notes/todo/명령 로그를 계속 갱신하지 마라.
 
-동적 런타임이 있으면 재현 가능한 solve.py의 깨끗한 Docker 성공 2회와 음성 대조군 1회를 기존 P4 증거로 P5-Lite에 전달하라. 런타임이 없으면 아래 STATIC-ONLY 검증 규칙을 적용한다. 소스 부재, stripped 또는 강한 난독화, heap/race/확률적 동작, 런타임 외의 프로토콜 불확실성, 로컬과 공식 환경의 차이, 익스플로잇 2회 실패 또는 빠른 탐색 예산 소진이 발생하면 작업을 재시작하지 말고 전체 P0~P6으로 전환하라.
+공식 원격 endpoint가 없고 동적 런타임이 있으면 재현 가능한 solve.py의 깨끗한 Docker 성공 2회와 음성 대조군 1회를 기존 P4 증거로 P5-Lite에 전달하라. 공식 원격 endpoint가 있으면 아래 Fast-to-Remote 규칙이 이 반복 검증보다 우선한다. 런타임이 없으면 아래 STATIC-ONLY 검증 규칙을 적용한다. 소스 부재, stripped 또는 강한 난독화, heap/race/확률적 동작, 런타임 외의 프로토콜 불확실성, 로컬과 공식 환경의 차이, 익스플로잇 2회 실패 또는 빠른 탐색 예산 소진이 발생하면 작업을 재시작하지 말고 전체 P0~P6으로 전환하라.
 EOF
 )
     ;;
@@ -206,16 +209,22 @@ prompt=$(cat <<EOF
 - 기준: AGENTS.md, rules/ruleset.md, pwn-agent/skills/SKILL.md, pwn-agent/docs/playbook.md
 - 런타임: $compact_runtime
 - 범위: 호스트 바이너리 실행과 플래그 자동 제출 금지
+- 정리: Dockerfile 기반 문제의 컨테이너와 $image_name 이미지는 Codex 종료 후 런처가 자동 정리함
 - 결과: 한국어로 진행하며 work/solve.py와 간결한 work/writeup.md만 기본 생성
 EOF
 )
+
+if [[ "$keep_docker" == true ]]; then
+  prompt+=$'\n- 정리 예외: 사용자가 --keep-docker를 지정했으므로 문제 컨테이너와 이미지를 보존하라.'
+fi
 
 if [[ -n "$remote_host" ]]; then
   prompt+=$(cat <<EOF
 
 - 공식 원격 범위: TCP $remote_host:$remote_port 한 곳만 사용 허가됨
-- 원격 절차: 로컬 exploit과 입력 프레이밍을 먼저 검증한 뒤 work/solve.py를 pwntools 표준 인자 REMOTE HOST=$remote_host PORT=$remote_port와 호환되게 완성하라. 마지막 P4에서 references/tools/pwn-remote-run.sh로 최대 2회만 실행하라.
-- 플래그 출력: solve.py는 challenge의 flag format으로 검증한 플래그를 얻었을 때만 FLAG=<원문> 한 줄을 stdout에 출력하라. 획득 즉시 사용자에게 '획득한 플래그: <원문>'으로 보여 주고 최종 답변에도 같은 원문을 포함하라. 파일 경로만 알려 주거나 플래그를 숨기지 마라.
+- Fast-to-Remote: 로컬에서 solve.py가 exploit 경로로 유효한 플래그를 1회 얻는 즉시 두 번째 로컬 성공, 음성 대조군, P5 및 write-up을 기다리지 말고 references/tools/pwn-remote-run.sh로 원격 exploit을 실행하라. 대회에서는 원격 플래그 획득이 최우선이다.
+- 원격 절차: work/solve.py를 pwntools 표준 인자 REMOTE HOST=$remote_host PORT=$remote_port와 호환되게 하고 첫 원격 시도를 즉시 수행하라. 실패한 경우에만 환경 차이를 분석하고 수정된 exploit으로 두 번째 시도를 허용한다.
+- 플래그 출력: solve.py는 challenge의 flag format으로 검증한 플래그를 얻었을 때만 FLAG=<원문> 한 줄을 stdout에 출력하고 즉시 연결을 닫고 종료하라. 하니스가 출력하는 '획득한 플래그: <원문>'과 '원격 플래그 획득 시간: N.NNN초'를 즉시 사용자에게 보여 주고 최종 답변에도 둘 다 포함하라. 파일 경로만 알려 주거나 출력을 P5까지 미루지 마라.
 - 원격 증거: 결정적 transcript와 플래그 후보를 evidence/private에 저장하고 공개용 writeup에는 플래그 원문을 넣지 마라. 실패하면 무차별 대입·포트 탐색·다른 호스트 접속 없이 차이와 blocker만 보고하라.
 EOF
 )
@@ -242,6 +251,11 @@ if [[ "$action" == dry-run ]]; then
   printf '런타임 모드:      %s\n' "$runtime_mode"
   printf '풀이 모드:        %s\n' "$solve_mode"
   printf '재빌드:           %s\n' "$rebuild"
+  if [[ "$runtime_mode" == supplied-docker && "$keep_docker" == false ]]; then
+    printf 'Docker 종료 정리: 자동\n'
+  else
+    printf 'Docker 종료 정리: 보존\n'
+  fi
   printf '감사 로그:        %s\n' "$audit_enabled"
   printf 'Codex 샌드박스:   %s\n' "$sandbox_mode"
   printf '승인 정책:        %s\n' "$approval_policy"
@@ -307,6 +321,27 @@ if [[ "$action" == prepare-only ]]; then
   exit 0
 fi
 
+cleanup_enabled=false
+if [[ "$runtime_mode" == supplied-docker && "$keep_docker" == false ]]; then
+  cleanup_enabled=true
+fi
+
+cleanup_on_exit() {
+  local status=$?
+  trap - EXIT INT TERM HUP
+  if [[ "$cleanup_enabled" == true ]]; then
+    printf '\n문제 Docker 리소스 정리 중: %s\n' "$image_name"
+    if ! "$tools_dir/pwn-cleanup.sh" "$image_name"; then
+      printf 'Docker 자동 정리에 실패했습니다. 풀이 결과와 종료 상태는 유지합니다.\n' >&2
+    fi
+  fi
+  exit "$status"
+}
+trap cleanup_on_exit EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
+
 build_status=0
 if [[ -f "$input_dir/Dockerfile" ]]; then
   build_args=()
@@ -353,4 +388,8 @@ if [[ "$audit_enabled" == true ]]; then
   exit "$codex_status"
 fi
 
-exec "$codex_bin" -C "$agent_root" --sandbox "$sandbox_mode" --ask-for-approval "$approval_policy" "$prompt"
+set +e
+"$codex_bin" -C "$agent_root" --sandbox "$sandbox_mode" --ask-for-approval "$approval_policy" "$prompt"
+codex_status=$?
+set -e
+exit "$codex_status"

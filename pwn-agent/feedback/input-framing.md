@@ -27,4 +27,4 @@
 
 ## 환경 경계
 
-Malformed variadic 호출은 libc 구현과 호출 시점의 레지스터·스택 상태에 의존한다. 공식 Docker 환경에서 먼저 성공 2회와 음성 대조군 1회를 확인하고, 무관한 libc 버전으로 일반화하지 않는다.
+Malformed variadic 호출은 libc 구현과 호출 시점의 레지스터·스택 상태에 의존한다. 원격 endpoint가 없으면 공식 Docker 환경에서 성공 2회와 음성 대조군 1회를 확인한다. 공식 원격 endpoint가 있으면 exploit으로 로컬 플래그를 1회 얻는 즉시 Fast-to-Remote를 먼저 수행하고, 반복 성공과 음성 대조군은 원격 실패 시에만 진행한다. 무관한 libc 버전으로 일반화하지 않는다.

@@ -27,6 +27,7 @@ Adaptive mode is the default for every category: P0-Lite, fixed routing when the
 - In Fast mode, keep state in the active session and create only the final solver and concise write-up. Do not continuously update notes, todo, command logs, or phase documents.
 - Escalate without restarting when source is absent, the target is stripped/obfuscated, heap/race/probabilistic behavior appears, environment/protocol remains uncertain, local and official behavior differ, two exploit trials fail, or the fast budget expires.
 - Reuse Fast results in Deep mode; never repeat completed discovery only to satisfy phase formatting.
+- For pwn with a recorded official endpoint, prioritize Fast-to-Remote: one local exploit-derived flag success triggers the bounded remote harness immediately, before repeated local controls, P5, or write-up. Print a remote flag and its measured acquisition time as soon as received.
 - Absence of a Dockerfile is not a blocker or an escalation trigger by itself. If no matching cached image exists, declare `STATIC-ONLY`, continue with source/static analysis, avoid Docker retries or host execution, and request an exact runtime only when a decisive dynamic test is genuinely required.
 
 ## Shared execution environment

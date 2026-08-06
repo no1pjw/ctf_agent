@@ -30,12 +30,15 @@ export CTF_PWNABLE_SOURCE=/path/to/pwnable
 ctf-pwn challenge-name
 ctf-pwn --fast-only challenge-name
 ctf-pwn --deep challenge-name
+ctf-pwn --keep-docker challenge-name
 ctf-pwn challenge-name host.example:31337
 ctf-pwn challenge-name host.example 31337
 ctf-learn challenge-name
 ```
 
-공식 CTF pwn 서비스 주소를 함께 주면 로컬 exploit 검증 후 해당 TCP `host:port`에만 최대 2회 접속하여 플래그 후보를 수집합니다. 검증된 플래그는 즉시 터미널에 `획득한 플래그: ...`로 출력하고 `challenges/<name>/evidence/private/`에도 저장합니다. 공개 write-up에서는 원문을 가리며 scoreboard에는 자동 제출하지 않습니다. 주소를 생략하면 대상 네트워크는 계속 차단됩니다.
+공식 CTF pwn 서비스 주소를 함께 주면 로컬 exploit이 플래그를 한 번 재현하는 즉시 반복 검증이나 write-up보다 원격 실행을 먼저 수행합니다. 검증된 원격 플래그와 실행 시작부터 수신까지의 시간은 즉시 `획득한 플래그: ...`, `원격 플래그 획득 시간: N.NNN초`로 출력하고 `challenges/<name>/evidence/private/`에도 저장합니다. 첫 원격 시도가 실패할 때만 차이를 분석해 수정된 exploit으로 한 번 더 시도합니다. 공개 write-up에서는 원문을 가리며 scoreboard에는 자동 제출하지 않습니다. 주소를 생략하면 대상 네트워크는 계속 차단됩니다.
+
+Dockerfile이 제공된 문제는 풀이의 성공·실패·중단 여부와 관계없이 종료할 때 해당 문제 컨테이너와 `ctf-<challenge>:local` 이미지를 자동 삭제합니다. 디버깅을 위해 보존해야 할 때만 `--keep-docker`를 지정합니다. 다른 이미지, 컨테이너, 볼륨과 base image는 삭제하지 않습니다.
 
 GitHub 공개 준비본을 만들 때는 커밋 메시지를 지정합니다. 기본값은 로컬 커밋까지만 수행합니다.
 

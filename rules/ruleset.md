@@ -18,7 +18,7 @@ Classify networking before use:
 
 Never treat build dependency access as authorization for target traffic. Stop on unexpected redirects, third parties, or runtime egress.
 
-For pwn challenges, a host and port explicitly supplied to `ctf-pwn` records one official TCP endpoint. Complete local validation first, then use the bounded remote harness for at most two exploit attempts. This authorization does not include port scanning, neighboring hosts, scoreboard access, brute force, persistence, or lateral movement.
+For pwn challenges, a host and port explicitly supplied to `ctf-pwn` records one official TCP endpoint. After one local exploit run derives a format-valid local flag, immediately use the bounded remote harness; do not delay for repeat controls. Allow a second attempt only after a material correction. This authorization does not include port scanning, neighboring hosts, scoreboard access, brute force, persistence, or lateral movement.
 
 ## R-4 Evidence
 
@@ -26,7 +26,7 @@ In default Fast mode, retain only the final solver, concise write-up, decisive o
 
 ## R-5 Reproducibility
 
-For deterministic Fast solves, require two clean P4 successes and one negative control. For probabilistic, race, heap, remote-dependent, or environment-sensitive solves, escalate verification depth and document reliability. A crash, anomaly, or plausible plaintext is not by itself a verified result.
+For deterministic Fast solves without a remote endpoint, require two clean P4 successes and one negative control. When an official pwn endpoint is recorded, one local flag-producing exploit success triggers an immediate bounded remote attempt before those controls; a format-valid flag derived by that remote exploit is the contest completion signal. On remote failure, resume deeper verification and environment comparison. A crash, anomaly, or plausible plaintext is not by itself a verified result.
 
 ## R-6 Exploit limits
 
