@@ -35,7 +35,7 @@ ctf-pwn challenge-name host.example 31337
 ctf-learn challenge-name
 ```
 
-공식 CTF pwn 서비스 주소를 함께 주면 로컬 exploit 검증 후 해당 TCP `host:port`에만 최대 2회 접속하여 플래그 후보를 수집합니다. 결과 transcript와 플래그는 `challenges/<name>/evidence/private/`에 저장하며 scoreboard에는 자동 제출하지 않습니다. 주소를 생략하면 대상 네트워크는 계속 차단됩니다.
+공식 CTF pwn 서비스 주소를 함께 주면 로컬 exploit 검증 후 해당 TCP `host:port`에만 최대 2회 접속하여 플래그 후보를 수집합니다. 검증된 플래그는 즉시 터미널에 `획득한 플래그: ...`로 출력하고 `challenges/<name>/evidence/private/`에도 저장합니다. 공개 write-up에서는 원문을 가리며 scoreboard에는 자동 제출하지 않습니다. 주소를 생략하면 대상 네트워크는 계속 차단됩니다.
 
 GitHub 공개 준비본을 만들 때는 커밋 메시지를 지정합니다. 기본값은 로컬 커밋까지만 수행합니다.
 

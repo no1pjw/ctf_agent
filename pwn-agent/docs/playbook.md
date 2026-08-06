@@ -39,4 +39,5 @@ When `scope/remote-target.env` records a user-declared official CTF endpoint:
 2. Parameterize `work/solve.py` with pwntools `REMOTE HOST=<host> PORT=<port>`; never hard-code a second endpoint. Exit nonzero when no valid flag is obtained so the bounded harness can distinguish failure.
 3. Run only through `pwn-remote-run.sh`, with one attempt by default and a second only after a bounded protocol/environment correction.
 4. Do not scan ports, discover adjacent hosts, brute-force ASLR or credentials, persist a shell, pivot, or contact a scoreboard.
-5. Stop immediately after the minimum flag proof. Save transcript and candidate flag only under `evidence/private/` and redact it from `work/writeup.md`.
+5. Require `solve.py` to return the validated flag and print exactly `FLAG=<flag>` on stdout; never print that marker for an unvalidated candidate.
+6. Stop immediately after the minimum flag proof. Show `획득한 플래그: <flag>` immediately in the terminal and include the exact flag in the final user response. Save transcript and candidate flag under `evidence/private/`, while redacting it from `work/writeup.md`.

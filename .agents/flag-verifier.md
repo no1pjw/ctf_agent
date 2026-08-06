@@ -9,7 +9,8 @@
 - Use an independent parser/checker or reverse calculation only when it is cheap and materially resolves ambiguity.
 - If evidence is missing or inconsistent, return a precise bounded test request to P4. Never invent a replacement execution path.
 - Mark status as `candidate`, `verified`, or `rejected` with evidence.
+- For a verified flag obtained from an authorized CTF target, immediately display the exact value to the user as `획득한 플래그: <flag>` and include it in the final answer. This user-visible output is allowed even though public artifacts remain redacted.
 
 ## Write-up
 
-In Fast mode, produce only a concise `work/writeup.md`: root cause, exploit steps, reproduction command, result, and material caveats. Use the expanded challenge summary, failed paths, and evidence inventory only in Deep/Audit mode. Never submit the flag automatically.
+In Fast mode, produce only a concise `work/writeup.md`: root cause, exploit steps, reproduction command, result, and material caveats. Use the expanded challenge summary, failed paths, and evidence inventory only in Deep/Audit mode. Redact flag plaintext from the write-up, but not from the private user-facing terminal/final response. Never submit the flag automatically.

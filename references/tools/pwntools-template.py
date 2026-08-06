@@ -23,6 +23,13 @@ def solve(io):
 if __name__ == "__main__":
     tube = start()
     try:
-        solve(tube)
+        flag = solve(tube)
+        if flag is None:
+            raise SystemExit("exploit completed without a validated flag")
+        if isinstance(flag, bytes):
+            flag = flag.decode(errors="strict")
+        if not isinstance(flag, str) or not flag:
+            raise SystemExit("solve() must return a validated flag string or bytes")
+        print(f"FLAG={flag}", flush=True)
     finally:
         tube.close()

@@ -48,6 +48,16 @@ for ((attempt = 1; attempt <= attempts; attempt++)); do
   status=${PIPESTATUS[0]}
   set -e
   printf 'exit_status=%s\n' "$status" | tee -a "$output_file"
+  flag_line="$(grep -aE '^FLAG=[^[:cntrl:]]+$' "$output_file" | tail -n 1 || true)"
+  if [[ -n "$flag_line" ]]; then
+    status=0
+    printf '\n획득한 플래그: %s\n' "${flag_line#FLAG=}"
+    break
+  fi
+  if [[ $status -eq 0 ]]; then
+    status=74
+    printf '검증된 FLAG= 출력이 없어 원격 실행을 성공으로 처리하지 않습니다.\n' | tee -a "$output_file"
+  fi
   [[ $status -ne 0 && $attempt -lt $attempts ]] || break
 done
 

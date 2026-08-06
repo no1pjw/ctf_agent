@@ -215,7 +215,8 @@ if [[ -n "$remote_host" ]]; then
 
 - 공식 원격 범위: TCP $remote_host:$remote_port 한 곳만 사용 허가됨
 - 원격 절차: 로컬 exploit과 입력 프레이밍을 먼저 검증한 뒤 work/solve.py를 pwntools 표준 인자 REMOTE HOST=$remote_host PORT=$remote_port와 호환되게 완성하라. 마지막 P4에서 references/tools/pwn-remote-run.sh로 최대 2회만 실행하라.
-- 원격 증거: 결정적 transcript와 플래그 후보를 evidence/private에 저장하고 writeup에는 플래그 원문을 넣지 마라. 실패하면 무차별 대입·포트 탐색·다른 호스트 접속 없이 차이와 blocker만 보고하라.
+- 플래그 출력: solve.py는 challenge의 flag format으로 검증한 플래그를 얻었을 때만 FLAG=<원문> 한 줄을 stdout에 출력하라. 획득 즉시 사용자에게 '획득한 플래그: <원문>'으로 보여 주고 최종 답변에도 같은 원문을 포함하라. 파일 경로만 알려 주거나 플래그를 숨기지 마라.
+- 원격 증거: 결정적 transcript와 플래그 후보를 evidence/private에 저장하고 공개용 writeup에는 플래그 원문을 넣지 마라. 실패하면 무차별 대입·포트 탐색·다른 호스트 접속 없이 차이와 blocker만 보고하라.
 EOF
 )
 else
