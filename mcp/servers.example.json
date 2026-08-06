@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "ctfd": {
+      "command": "REPLACE_WITH_CTFFD_MCP_COMMAND",
+      "args": [],
+      "env": {
+        "CTFD_URL": "https://ctf.example",
+        "CTFD_TOKEN": "SET_IN_PRIVATE_ENV"
+      },
+      "disabled": true
+    },
+    "burp": {
+      "command": "REPLACE_WITH_BURP_MCP_COMMAND",
+      "args": [],
+      "disabled": true
+    }
+  }
+}

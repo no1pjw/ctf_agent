@@ -1,0 +1,1 @@
+../../.agents/forensics-analyst.md

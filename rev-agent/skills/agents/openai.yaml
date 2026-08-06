@@ -1,0 +1,4 @@
+interface:
+  display_name: "CTF Reverse Agent"
+  short_description: "Analyze and solve authorized CTF reversing challenges"
+  default_prompt: "Use $ctf-rev to analyze this authorized CTF reversing challenge."

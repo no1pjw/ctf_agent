@@ -1,0 +1,4 @@
+interface:
+  display_name: "CTF Pwn Agent"
+  short_description: "Develop and verify authorized CTF binary exploits"
+  default_prompt: "Use $ctf-pwn to solve this authorized CTF pwn challenge."

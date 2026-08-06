@@ -1,0 +1,4 @@
+interface:
+  display_name: "CTF Web Agent"
+  short_description: "Analyze and solve authorized CTF web challenges"
+  default_prompt: "Use $ctf-web to solve this authorized CTF web challenge."

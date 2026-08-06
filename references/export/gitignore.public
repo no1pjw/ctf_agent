@@ -1,0 +1,17 @@
+**/__pycache__/
+**/.pytest_cache/
+**/.venv/
+**/core
+**/core.*
+**/*.pcapng.tmp
+**/private.env
+**/secrets.*
+**/candidate-flags.txt
+challenges/*
+!challenges/.gitkeep
+state/*
+!state/notes.md
+!state/todo.md
+*.log
+.env
+

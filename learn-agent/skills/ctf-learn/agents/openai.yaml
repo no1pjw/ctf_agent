@@ -1,0 +1,5 @@
+interface:
+  display_name: "CTF Learn"
+  short_description: "완료된 CTF 풀이에서 재사용 가능한 교훈을 선별하여 축적"
+  default_prompt: "Use $ctf-learn to distill reusable lessons from a completed CTF challenge."
+
