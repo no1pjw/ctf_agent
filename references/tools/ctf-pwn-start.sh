@@ -3,7 +3,8 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-사용법: ctf-pwn [옵션] 문제이름
+사용법: ctf-pwn [옵션] 문제이름 [호스트:포트]
+        ctf-pwn [옵션] 문제이름 [호스트 포트]
 
 실행 모드:
   (기본값)      빠른 탐색 후 필요할 때만 Deep 모드로 자동 전환
@@ -15,6 +16,11 @@ usage() {
   --rebuild     캐시 대신 문제 Docker 이미지 다시 빌드
   --dry-run     경로, 모드, 권한 및 생성 프롬프트만 표시
   --prepare-only  Codex 실행 없이 파일 복사 및 작업 디렉터리 준비
+
+원격 대상:
+  문제 이름 뒤에 공식 CTF 서비스 주소를 지정하면 로컬 검증 후 완성된
+  work/solve.py를 그 주소에만 제한 실행하여 플래그 후보를 수집합니다.
+  예: ctf-pwn cherry host3.dreamhack.games:12345
 
 환경 변수:
   CTF_PWNABLE_SOURCE  문제 폴더 또는 ZIP이 있는 원본 디렉터리
@@ -28,6 +34,9 @@ solve_mode=adaptive
 audit_enabled=false
 rebuild=false
 challenge_name=
+remote_host=
+remote_port=
+positionals=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -38,17 +47,52 @@ while [[ $# -gt 0 ]]; do
     --dry-run) action=dry-run ;;
     --prepare-only) action=prepare-only ;;
     -h|--help) usage; exit 0 ;;
-    --) shift; [[ -z "$challenge_name" && $# -eq 1 ]] && challenge_name=$1 && shift; break ;;
+    --) shift; positionals+=("$@"); break ;;
     -*) printf '알 수 없는 옵션: %s\n' "$1" >&2; usage >&2; exit 64 ;;
-    *)
-      [[ -z "$challenge_name" ]] || { echo '문제 이름은 하나만 지정할 수 있습니다.' >&2; exit 64; }
-      challenge_name=$1
-      ;;
+    *) positionals+=("$1") ;;
   esac
   shift
 done
 
-[[ -n "$challenge_name" && $# -eq 0 ]] || { usage >&2; exit 64; }
+case ${#positionals[@]} in
+  1)
+    challenge_name=${positionals[0]}
+    ;;
+  2)
+    challenge_name=${positionals[0]}
+    endpoint=${positionals[1]}
+    if [[ "$endpoint" =~ ^\[([^]]+)\]:([0-9]+)$ ]]; then
+      remote_host=${BASH_REMATCH[1]}
+      remote_port=${BASH_REMATCH[2]}
+    elif [[ "$endpoint" =~ ^([^:/[:space:]]+):([0-9]+)$ ]]; then
+      remote_host=${BASH_REMATCH[1]}
+      remote_port=${BASH_REMATCH[2]}
+    else
+      echo '원격 주소는 호스트:포트 형식으로 지정하세요.' >&2
+      exit 64
+    fi
+    ;;
+  3)
+    challenge_name=${positionals[0]}
+    remote_host=${positionals[1]}
+    remote_port=${positionals[2]}
+    ;;
+  *) usage >&2; exit 64 ;;
+esac
+
+if [[ -n "$remote_host" ]]; then
+  if [[ "$remote_host" == *:* ]]; then
+    host_valid=false
+    [[ "$remote_host" =~ ^[0-9A-Fa-f:]+$ ]] && host_valid=true
+  else
+    host_valid=false
+    [[ "$remote_host" =~ ^[A-Za-z0-9.-]+$ ]] && host_valid=true
+  fi
+  if [[ "$host_valid" != true ]] || [[ ! "$remote_port" =~ ^[0-9]+$ ]] || (( remote_port < 1 || remote_port > 65535 )); then
+    echo '잘못된 원격 주소입니다. 호스트와 1~65535 포트를 확인하세요.' >&2
+    exit 65
+  fi
+fi
 if [[ ! "$challenge_name" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || [[ "$challenge_name" == "." || "$challenge_name" == ".." ]]; then
   printf '잘못된 문제 이름입니다: %s\n' "$challenge_name" >&2
   exit 65
@@ -64,6 +108,7 @@ challenge_dir="$agent_root/challenges/$challenge_name"
 input_dir="$challenge_dir/input"
 work_dir="$challenge_dir/work"
 evidence_dir="$challenge_dir/evidence"
+scope_dir="$challenge_dir/scope"
 tools_dir="$agent_root/references/tools"
 image_slug="$(printf '%s' "$challenge_name" | tr '[:upper:]_.' '[:lower:]--')"
 image_name="ctf-$image_slug:local"
@@ -160,10 +205,22 @@ prompt=$(cat <<EOF
 - 설정: mode=$solve_mode, runtime=$runtime_mode
 - 기준: AGENTS.md, rules/ruleset.md, pwn-agent/skills/SKILL.md, pwn-agent/docs/playbook.md
 - 런타임: $compact_runtime
-- 범위: 원격 접속, 호스트 바이너리 실행, 플래그 자동 제출 금지
+- 범위: 호스트 바이너리 실행과 플래그 자동 제출 금지
 - 결과: 한국어로 진행하며 work/solve.py와 간결한 work/writeup.md만 기본 생성
 EOF
 )
+
+if [[ -n "$remote_host" ]]; then
+  prompt+=$(cat <<EOF
+
+- 공식 원격 범위: TCP $remote_host:$remote_port 한 곳만 사용 허가됨
+- 원격 절차: 로컬 exploit과 입력 프레이밍을 먼저 검증한 뒤 work/solve.py를 pwntools 표준 인자 REMOTE HOST=$remote_host PORT=$remote_port와 호환되게 완성하라. 마지막 P4에서 references/tools/pwn-remote-run.sh로 최대 2회만 실행하라.
+- 원격 증거: 결정적 transcript와 플래그 후보를 evidence/private에 저장하고 writeup에는 플래그 원문을 넣지 마라. 실패하면 무차별 대입·포트 탐색·다른 호스트 접속 없이 차이와 blocker만 보고하라.
+EOF
+)
+else
+  prompt+=$'\n- 원격 범위: 미지정이므로 모든 대상 네트워크 접속 금지'
+fi
 
 if [[ "$rebuild" == true ]]; then
   if [[ "$runtime_mode" == supplied-docker ]]; then
@@ -187,12 +244,28 @@ if [[ "$action" == dry-run ]]; then
   printf '감사 로그:        %s\n' "$audit_enabled"
   printf 'Codex 샌드박스:   %s\n' "$sandbox_mode"
   printf '승인 정책:        %s\n' "$approval_policy"
+  if [[ -n "$remote_host" ]]; then
+    printf '공식 원격 대상:   %s:%s\n' "$remote_host" "$remote_port"
+  else
+    printf '공식 원격 대상:   지정 안 됨\n'
+  fi
   printf '\nCodex에 전달할 프롬프트:\n%s\n' "$prompt"
   exit 0
 fi
 
-mkdir -p "$input_dir" "$work_dir" "$evidence_dir"
+mkdir -p "$input_dir" "$work_dir" "$evidence_dir" "$scope_dir"
 printf 'pwn\n' > "$challenge_dir/.ctf-category"
+if [[ -n "$remote_host" ]]; then
+  {
+    printf 'authorization=user-declared-official-ctf-endpoint\n'
+    printf 'protocol=tcp\n'
+    printf 'host=%s\nport=%s\n' "$remote_host" "$remote_port"
+    printf 'allowed_attempts=2\n'
+    printf 'scoreboard_submission=denied\n'
+  } > "$scope_dir/remote-target.env"
+else
+  rm -f -- "$scope_dir/remote-target.env"
+fi
 if [[ -d "$source_dir" ]]; then
   cp -a --update=none -- "$source_dir"/. "$input_dir"/
 else
@@ -212,7 +285,12 @@ if [[ "$audit_enabled" == true ]]; then
   {
     printf 'run_id=%s\nstarted_utc=%s\nchallenge=%s\n' "$run_id" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$challenge_name"
     printf 'solve_mode=%s\nrebuild=%s\nruntime_mode=%s\nsandbox=%s\napproval=%s\n' "$solve_mode" "$rebuild" "$runtime_mode" "$sandbox_mode" "$approval_policy"
-    printf 'target_network=denied\nbuild_network=controlled-by-pwn-build\nruntime_network=none\nstatus=starting\n'
+    if [[ -n "$remote_host" ]]; then
+      printf 'target_network=exact-endpoint-only\ntarget_host=%s\ntarget_port=%s\n' "$remote_host" "$remote_port"
+    else
+      printf 'target_network=denied\n'
+    fi
+    printf 'build_network=controlled-by-pwn-build\nruntime_network=none\nstatus=starting\n'
   } > "$audit_dir/run-info.txt"
   find "$agent_root/.agents" "$agent_root/pwn-agent" "$agent_root/rules" "$agent_root/shimes" -type f -print | sort > "$audit_dir/available-role-files.txt"
   if "$codex_bin" -C "$agent_root" debug prompt-input "$prompt" > "$audit_dir/prompt-input.json" 2> "$audit_dir/prompt-input.stderr.log"; then

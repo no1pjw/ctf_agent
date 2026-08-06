@@ -18,6 +18,8 @@ Classify networking before use:
 
 Never treat build dependency access as authorization for target traffic. Stop on unexpected redirects, third parties, or runtime egress.
 
+For pwn challenges, a host and port explicitly supplied to `ctf-pwn` records one official TCP endpoint. Complete local validation first, then use the bounded remote harness for at most two exploit attempts. This authorization does not include port scanning, neighboring hosts, scoreboard access, brute force, persistence, or lateral movement.
+
 ## R-4 Evidence
 
 In default Fast mode, retain only the final solver, concise write-up, decisive output, environment assumptions, and verification controls. Detailed command logs, timestamps, phase notes, and raw evidence packets are required only in Deep/Audit mode or for a long-running checkpoint. Never generate or check SHA-256 records; redact tokens, personal data, and flags from public write-ups when required.

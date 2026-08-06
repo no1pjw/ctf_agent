@@ -30,6 +30,7 @@ chmod +x \
   "$target_dir/references/tools/pwn-env-preflight.sh" \
   "$target_dir/references/tools/pwn-build.sh" \
   "$target_dir/references/tools/pwn-run.sh" \
+  "$target_dir/references/tools/pwn-remote-run.sh" \
   "$target_dir/references/tools/pwn-triage.sh" \
   "$target_dir/references/tools/sandbox-run.sh" \
   "$target_dir/references/tools/pwntools-template.py"

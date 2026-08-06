@@ -14,8 +14,8 @@ Read `../docs/HARD_RULES.md`, then `../docs/role.md` and `../docs/playbook.md`. 
 3. Use `../../references/tools/pwn-triage.sh`, `pwn-build.sh`, `pwn-run.sh`, and the pwntools template instead of rebuilding command logic.
    If neither a Dockerfile nor the named cached image exists, enter `STATIC-ONLY`: run static triage once, do not synthesize or pull an environment, do not retry Docker, and do not escalate solely for the missing Dockerfile.
 4. Prove primitives incrementally: reachability, control, leak, calculation, final effect.
-5. Execute only through P4 inside Docker/sandbox or the exact official endpoint recorded in scope.
+5. Execute only through P4 inside Docker/sandbox or the exact official endpoint recorded in `scope/remote-target.env`. For a recorded remote target, finish and locally validate the solver first, keep it compatible with pwntools `REMOTE HOST=... PORT=...`, then use `../../references/tools/pwn-remote-run.sh` for no more than two bounded attempts.
 6. Have P4 produce two clean successes plus one negative control for deterministic solves. Have P5 verify existing evidence without executing.
 7. In Fast mode write only `work/solve.py` and concise `work/writeup.md`; use detailed logs only for Deep/Audit or checkpoints.
 
-Return the primitive chain, exploit, environment, transcripts, controls, and reproduction steps. Never generalize an exploit to unrelated targets.
+Return the primitive chain, exploit, environment, transcripts, controls, and reproduction steps. Store remote transcripts and candidate flags under `evidence/private/`; do not put flag plaintext in the public write-up or submit it to a scoreboard. Never generalize an exploit to unrelated targets.

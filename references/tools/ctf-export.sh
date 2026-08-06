@@ -146,7 +146,11 @@ printf '커밋 작성자:     %s <%s>\n' "$author_name" "$author_email"
 if [[ "$dry_run" == true ]]; then
   printf '커밋 메시지:     %s\n' "${commit_message:-(실행 시 입력)}"
   printf '제외: challenges 원본, state 내용, evidence, work, 바이너리, 플래그, 로그\n'
-  printf '동작: whitelist 복사 → 개인 경로 일반화 → 민감정보 검사 → 로컬 커밋\n'
+  if [[ "$push_enabled" == true ]]; then
+    printf '동작: 원격 main clone → 공개 파일 동기화 → 민감정보 검사 → 커밋 → fast-forward push\n'
+  else
+    printf '동작: whitelist 복사 → 개인 경로 일반화 → 민감정보 검사 → 로컬 커밋\n'
+  fi
   printf 'push: %s\n' "$([[ "$push_enabled" == true ]] && echo '요청됨' || echo '수행하지 않음')"
   exit 0
 fi
@@ -164,7 +168,37 @@ make_manifest() {
 make_manifest > "$before_manifest"
 
 mkdir -p -- "$(dirname -- "$output_real")"
-mkdir -- "$output_real"
+if [[ "$push_enabled" == true ]]; then
+  printf '원격 이력 가져오는 중: %s\n' "$repo_url"
+  set +e
+  git clone --origin origin -- "$repo_url" "$output_real"
+  clone_status=$?
+  set -e
+  if [[ $clone_status -ne 0 ]]; then
+    printf '원격 저장소 clone에 실패했습니다. 인증·URL·네트워크를 확인하세요.\n' >&2
+    printf '불완전한 출력 경로가 남아 있을 수 있습니다: %s\n' "$output_real" >&2
+    exit 73
+  fi
+
+  if git -C "$output_real" show-ref --verify --quiet refs/remotes/origin/main; then
+    git -C "$output_real" checkout -B main origin/main >/dev/null
+  elif git -C "$output_real" rev-parse --verify HEAD >/dev/null 2>&1; then
+    git -C "$output_real" checkout --orphan main >/dev/null
+  else
+    git -C "$output_real" symbolic-ref HEAD refs/heads/main
+  fi
+  managed_items=(
+    "${copy_items[@]}"
+    challenges
+    state
+    AGENTS.md
+    CLAUDE.md
+    .gitignore
+  )
+  git -C "$output_real" rm -r -f --ignore-unmatch -- "${managed_items[@]}" >/dev/null
+else
+  mkdir -- "$output_real"
+fi
 for item in "${copy_items[@]}"; do
   cp -a -- "$source_real/$item" "$output_real/"
 done
@@ -213,14 +247,22 @@ if ! cmp -s -- "$before_manifest" "$after_manifest"; then
   exit 71
 fi
 
-git -C "$output_real" init --initial-branch=main >/dev/null
+if [[ "$push_enabled" == false ]]; then
+  git -C "$output_real" init --initial-branch=main >/dev/null
+  git -C "$output_real" remote add origin "$repo_url"
+fi
 git -C "$output_real" config user.name "$author_name"
 git -C "$output_real" config user.email "$author_email"
-git -C "$output_real" remote add origin "$repo_url"
 git -C "$output_real" add -A
-git -C "$output_real" commit -m "$commit_message" >/dev/null
 
-commit_id="$(git -C "$output_real" rev-parse --short HEAD)"
+commit_created=true
+if git -C "$output_real" diff --cached --quiet; then
+  commit_created=false
+else
+  git -C "$output_real" commit -m "$commit_message" >/dev/null
+fi
+
+commit_id="$(git -C "$output_real" rev-parse --short HEAD 2>/dev/null || true)"
 [[ -z "$(git -C "$output_real" status --short)" ]] || {
   echo '커밋 후 공개본 작업 트리가 깨끗하지 않습니다.' >&2
   exit 72
@@ -228,7 +270,11 @@ commit_id="$(git -C "$output_real" rev-parse --short HEAD)"
 
 printf '\n공개 준비 완료\n'
 printf '경로:   %s\n' "$output_real"
-printf '커밋:   %s %s\n' "$commit_id" "$commit_message"
+if [[ "$commit_created" == true ]]; then
+  printf '커밋:   %s %s\n' "$commit_id" "$commit_message"
+else
+  printf '커밋:   변경 없음 (원격 main과 공개 내용이 동일함)\n'
+fi
 printf '원격:   %s\n' "$repo_url"
 printf '원본은 수정되지 않았습니다.\n'
 
@@ -240,7 +286,7 @@ if [[ "$push_enabled" == true ]]; then
   set -e
   if [[ $push_status -ne 0 ]]; then
     printf '\npush에 실패했습니다. 공개본과 로컬 커밋은 그대로 보존됩니다.\n' >&2
-    printf 'GitHub 인증 또는 원격 브랜치 이력을 확인한 뒤 다음 명령으로 다시 시도하세요:\n' >&2
+    printf 'GitHub 인증 또는 원격의 동시 변경 여부를 확인한 뒤 다음 명령으로 다시 시도하세요:\n' >&2
     printf '  git -C %q push --set-upstream origin main\n' "$output_real" >&2
     printf '강제 push는 자동으로 수행하지 않습니다.\n' >&2
     exit 73
