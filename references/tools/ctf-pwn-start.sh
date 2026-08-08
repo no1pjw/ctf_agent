@@ -15,6 +15,7 @@ usage() {
   --audit       입력 프롬프트, 역할 목록, TUI 로그 및 사용 내역 기록
   --rebuild     캐시 대신 문제 Docker 이미지 다시 빌드
   --keep-docker 풀이 종료 후 문제 컨테이너와 이미지를 보존
+  --keep-workspace  풀이 완료 후에도 중복 입력과 실행 로그를 보존
   --dry-run     경로, 모드, 권한 및 생성 프롬프트만 표시
   --prepare-only  Codex 실행 없이 파일 복사 및 작업 디렉터리 준비
 
@@ -27,6 +28,7 @@ usage() {
   CTF_PWNABLE_SOURCE  문제 폴더 또는 ZIP이 있는 원본 디렉터리
   CTF_AGENT_ROOT      설치된 ctf-agent 루트
   CODEX_BIN           Codex CLI의 명시적 경로
+  CTF_MIN_HOST_FREE_MB 실행 전 필요한 Windows 호스트 최소 여유 공간(MiB, 기본 4096)
 EOF
 }
 
@@ -35,6 +37,7 @@ solve_mode=adaptive
 audit_enabled=false
 rebuild=false
 keep_docker=false
+keep_workspace=false
 challenge_name=
 remote_host=
 remote_port=
@@ -45,6 +48,7 @@ while [[ $# -gt 0 ]]; do
     --audit) audit_enabled=true ;;
     --rebuild) rebuild=true ;;
     --keep-docker) keep_docker=true ;;
+    --keep-workspace) keep_workspace=true ;;
     --fast-only) solve_mode=fast-only ;;
     --deep) solve_mode=deep ;;
     --dry-run) action=dry-run ;;
@@ -211,6 +215,7 @@ prompt=$(cat <<EOF
 - 범위: 호스트 바이너리 실행과 플래그 자동 제출 금지
 - 정리: Dockerfile 기반 문제의 컨테이너와 $image_name 이미지는 Codex 종료 후 런처가 자동 정리함
 - 결과: 한국어로 진행하며 work/solve.py와 간결한 work/writeup.md만 기본 생성
+- 완료 표식: 로컬 또는 공식 원격에서 플래그를 실제 검증한 뒤에만 work/.solved에 verified 한 줄을 기록
 EOF
 )
 
@@ -259,6 +264,7 @@ if [[ "$action" == dry-run ]]; then
   printf '감사 로그:        %s\n' "$audit_enabled"
   printf 'Codex 샌드박스:   %s\n' "$sandbox_mode"
   printf '승인 정책:        %s\n' "$approval_policy"
+  printf '완료 후 작업공간 정리: %s\n' "$([[ "$keep_workspace" == true ]] && printf '보존' || printf '자동')"
   if [[ -n "$remote_host" ]]; then
     printf '공식 원격 대상:   %s:%s\n' "$remote_host" "$remote_port"
   else
@@ -266,6 +272,20 @@ if [[ "$action" == dry-run ]]; then
   fi
   printf '\nCodex에 전달할 프롬프트:\n%s\n' "$prompt"
   exit 0
+fi
+
+min_host_free_mb=${CTF_MIN_HOST_FREE_MB:-4096}
+if [[ ! "$min_host_free_mb" =~ ^[0-9]+$ ]]; then
+  printf 'CTF_MIN_HOST_FREE_MB는 0 이상의 정수여야 합니다: %s\n' "$min_host_free_mb" >&2
+  exit 65
+fi
+if [[ -d /mnt/c && "$min_host_free_mb" -gt 0 ]]; then
+  host_free_kb=$(df -Pk /mnt/c | awk 'NR==2 {print $4}')
+  if [[ "$host_free_kb" =~ ^[0-9]+$ ]] && (( host_free_kb < min_host_free_mb * 1024 )); then
+    printf 'Windows 호스트 여유 공간이 부족하여 새 문제 복사를 중단합니다: %s MiB 미만\n' "$min_host_free_mb" >&2
+    printf '먼저 ctf-clean --caches --apply를 실행하거나 CTF_MIN_HOST_FREE_MB를 명시적으로 조정하세요.\n' >&2
+    exit 72
+  fi
 fi
 
 mkdir -p "$input_dir" "$work_dir" "$evidence_dir" "$scope_dir"
@@ -282,8 +302,10 @@ else
   rm -f -- "$scope_dir/remote-target.env"
 fi
 if [[ -d "$source_dir" ]]; then
+  printf '%s\n' "$source_dir" > "$scope_dir/source-path.txt"
   cp -a --update=none -- "$source_dir"/. "$input_dir"/
 else
+  printf '%s\n' "$source_zip" > "$scope_dir/source-path.txt"
   cp -a --update=none -- "$source_zip" "$input_dir"/
 fi
 printf '문제 준비 완료: %s\n' "$challenge_dir"
@@ -333,6 +355,12 @@ cleanup_on_exit() {
     printf '\n문제 Docker 리소스 정리 중: %s\n' "$image_name"
     if ! "$tools_dir/pwn-cleanup.sh" "$image_name"; then
       printf 'Docker 자동 정리에 실패했습니다. 풀이 결과와 종료 상태는 유지합니다.\n' >&2
+    fi
+  fi
+  if [[ "$keep_workspace" == false && -f "$work_dir/.solved" && -x "$tools_dir/ctf-clean.sh" ]]; then
+    printf '\n검증 완료 문제의 중복 작업 파일 정리 중: %s\n' "$challenge_name"
+    if ! "$tools_dir/ctf-clean.sh" --apply "$challenge_name"; then
+      printf '작업공간 자동 정리에 실패했습니다. 풀이 및 학습 기록은 그대로 보존됩니다.\n' >&2
     fi
   fi
   exit "$status"

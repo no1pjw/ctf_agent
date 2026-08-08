@@ -6,6 +6,7 @@ Codex CLI에서 로컬 CTF 문제를 분야별 에이전트와 재현 가능한 
 
 - `ctf-pwn`: pwn 문제 복사, Adaptive Fast→Deep 풀이, Docker 또는 STATIC-ONLY 실행
 - `ctf-learn`: 완료된 풀이에서 검증된 재사용 교훈만 분야별 피드백에 축적
+- `ctf-clean`: 학습·풀이 결과를 보존하면서 중복 입력, 실행 로그와 재생성 캐시 정리
 - `ctf-export`: 원본을 수정하지 않고 GitHub 공개용 복사본과 로컬 커밋 생성
 - pwn, reverse engineering, web, crypto, forensics/misc 라우팅
 - 신뢰할 수 없는 실행 파일의 호스트 실행 금지와 Docker 네트워크 격리
@@ -34,7 +35,11 @@ ctf-pwn --keep-docker challenge-name
 ctf-pwn challenge-name host.example:31337
 ctf-pwn challenge-name host.example 31337
 ctf-learn challenge-name
+ctf-clean
+ctf-clean --caches --apply
 ```
+
+`ctf-clean`은 기본적으로 미리보기만 수행합니다. `--apply`를 지정해도 `ctf-learn` 피드백, `work/solve.py`, `work/writeup.md`, `evidence/private`, `scope`는 항상 보존합니다. 문제의 `input/`은 풀이가 완료됐고 외부 원본 경로가 실제로 확인될 때만 삭제합니다. `--caches`는 다시 내려받거나 생성할 수 있는 Go 빌드, pip, uv 캐시만 추가로 정리하며 설치된 도구와 라이브러리는 제거하지 않습니다.
 
 공식 CTF pwn 서비스 주소를 함께 주면 로컬 exploit이 플래그를 한 번 재현하는 즉시 반복 검증이나 write-up보다 원격 실행을 먼저 수행합니다. 검증된 원격 플래그와 실행 시작부터 수신까지의 시간은 즉시 `획득한 플래그: ...`, `원격 플래그 획득 시간: N.NNN초`로 출력하고 `challenges/<name>/evidence/private/`에도 저장합니다. 첫 원격 시도가 실패할 때만 차이를 분석해 수정된 exploit으로 한 번 더 시도합니다. 공개 write-up에서는 원문을 가리며 scoreboard에는 자동 제출하지 않습니다. 주소를 생략하면 대상 네트워크는 계속 차단됩니다.
 

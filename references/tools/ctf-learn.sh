@@ -110,3 +110,9 @@ if [[ $status -ne 0 ]]; then
   tail -n 80 "$trace_file" >&2
   exit "$status"
 fi
+
+printf 'learned\n' > "$challenge_dir/work/.learned"
+printf '학습 기록 반영 완료: %s\n' "$feedback_dir"
+if [[ -x "$agent_root/references/tools/ctf-clean.sh" ]]; then
+  "$agent_root/references/tools/ctf-clean.sh" --apply "$challenge_name"
+fi

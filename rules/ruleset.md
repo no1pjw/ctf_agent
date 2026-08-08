@@ -24,6 +24,8 @@ For pwn challenges, a host and port explicitly supplied to `ctf-pwn` records one
 
 In default Fast mode, retain only the final solver, concise write-up, decisive output, environment assumptions, and verification controls. Detailed command logs, timestamps, phase notes, and raw evidence packets are required only in Deep/Audit mode or for a long-running checkpoint. Never generate or check SHA-256 records; redact tokens, personal data, and flags from public write-ups when required.
 
+Storage compaction must never delete category feedback, `work/solve.py`, `work/writeup.md`, `scope`, or `evidence/private`. Duplicate challenge inputs may be removed only after completion and only when a readable external source copy is recorded or discoverable. Incomplete challenges and unknown files are preserved. Rebuildable language caches and core dumps are not learning records.
+
 ## R-5 Reproducibility
 
 For deterministic Fast solves without a remote endpoint, require two clean P4 successes and one negative control. When an official pwn endpoint is recorded, one local flag-producing exploit success triggers an immediate bounded remote attempt before those controls; a format-valid flag derived by that remote exploit is the contest completion signal. On remote failure, resume deeper verification and environment comparison. A crash, anomaly, or plausible plaintext is not by itself a verified result.

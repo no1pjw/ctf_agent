@@ -26,6 +26,7 @@ chmod +x \
   "$target_dir/install-wsl.sh" \
   "$target_dir/references/tools/ctf-pwn-start.sh" \
   "$target_dir/references/tools/ctf-learn.sh" \
+  "$target_dir/references/tools/ctf-clean.sh" \
   "$target_dir/references/tools/ctf-export.sh" \
   "$target_dir/references/tools/pwn-env-preflight.sh" \
   "$target_dir/references/tools/pwn-build.sh" \
@@ -39,6 +40,7 @@ chmod +x \
 mkdir -p "$HOME/.local/bin"
 ln -sfn "$target_dir/references/tools/ctf-pwn-start.sh" "$HOME/.local/bin/ctf-pwn"
 ln -sfn "$target_dir/references/tools/ctf-learn.sh" "$HOME/.local/bin/ctf-learn"
+ln -sfn "$target_dir/references/tools/ctf-clean.sh" "$HOME/.local/bin/ctf-clean"
 ln -sfn "$target_dir/references/tools/ctf-export.sh" "$HOME/.local/bin/ctf-export"
 
 mkdir -p "$HOME/.codex/skills"
@@ -58,5 +60,6 @@ done
 printf 'Installed CTF agent: %s\n' "$target_dir"
 printf 'Pwn launcher:        %s\n' "$HOME/.local/bin/ctf-pwn"
 printf 'Learning command:    %s\n' "$HOME/.local/bin/ctf-learn"
+printf 'Cleanup command:     %s\n' "$HOME/.local/bin/ctf-clean"
 printf 'Export command:      %s\n' "$HOME/.local/bin/ctf-export"
 printf 'Start with: cd %q && codex\n' "$target_dir"
