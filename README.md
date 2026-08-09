@@ -5,6 +5,7 @@ Codex CLI에서 로컬 CTF 문제를 분야별 에이전트와 재현 가능한 
 ## 주요 기능
 
 - `ctf-pwn`: pwn 문제 복사, Adaptive Fast→Deep 풀이, Docker 또는 STATIC-ONLY 실행
+- `ctf-rev`: 리버싱 문제 복사, Adaptive Fast→Deep 분석, 격리 실행 강제
 - `ctf-learn`: 완료된 풀이에서 검증된 재사용 교훈만 분야별 피드백에 축적
 - `ctf-clean`: 학습·풀이 결과를 보존하면서 중복 입력, 실행 로그와 재생성 캐시 정리
 - `ctf-export`: 원본을 수정하지 않고 GitHub 공개용 복사본과 로컬 커밋 생성
@@ -34,10 +35,13 @@ ctf-pwn --deep challenge-name
 ctf-pwn --keep-docker challenge-name
 ctf-pwn challenge-name host.example:31337
 ctf-pwn challenge-name host.example 31337
+ctf-rev --source /path/to/reversing challenge-name
 ctf-learn challenge-name
 ctf-clean
 ctf-clean --caches --apply
 ```
+
+리버싱 문제의 기본 원본 경로는 `$HOME/ctf-challenges/reversing`입니다. 다른 위치는 `--source` 또는 `CTF_REV_SOURCE`로 지정합니다. 제공된 Dockerfile이 없으면 바이너리를 호스트에서 실행하지 않는 STATIC-ONLY 분석으로 진행합니다.
 
 `ctf-clean`은 기본적으로 미리보기만 수행합니다. `--apply`를 지정해도 `ctf-learn` 피드백, `work/solve.py`, `work/writeup.md`, `evidence/private`, `scope`는 항상 보존합니다. 문제의 `input/`은 풀이가 완료됐고 외부 원본 경로가 실제로 확인될 때만 삭제합니다. `--caches`는 다시 내려받거나 생성할 수 있는 Go 빌드, pip, uv 캐시만 추가로 정리하며 설치된 도구와 라이브러리는 제거하지 않습니다.
 

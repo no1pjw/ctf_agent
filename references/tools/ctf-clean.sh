@@ -71,7 +71,7 @@ remove_exact() {
 
 is_completed() {
   local dir=$1
-  [[ -f "$dir/work/.solved" || -f "$dir/work/.learned" || ( -f "$dir/work/solve.py" && -f "$dir/work/writeup.md" ) ]]
+  [[ -f "$dir/work/.solved" || -f "$dir/work/.learned" || ( -f "$dir/work/solve.py" && -f "$dir/work/writeup.md" ) || ( -f "$dir/work/recover.py" && -f "$dir/work/writeup.md" ) ]]
 }
 
 find_source() {
