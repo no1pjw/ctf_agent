@@ -38,10 +38,29 @@ ctf-pwn --keep-docker challenge-name
 ctf-pwn challenge-name host.example:31337
 ctf-pwn challenge-name host.example 31337
 ctf-rev --source /path/to/reversing challenge-name
+ctf-bench challenge-name
+ctf-bench --source /path/to/challenge challenge-name
+ctf-bench --remote host.example:31337 challenge-name
 ctf-learn challenge-name
 ctf-clean
 ctf-clean --caches --apply
 ```
+
+## 벤치마크
+
+`ctf-bench`는 같은 pwn 문제를 `plain Codex`와 `FAST_LOCAL`의 격리된 작업공간에서 동시에 실행합니다. 두 실행 모두 `gpt-5.6-sol`, `xhigh`, 멀티에이전트 비활성화 및 ephemeral non-interactive 모드를 강제하며, 실행별 Docker 이미지 이름과 이벤트 로그를 분리합니다. 진행 중 이벤트는 터미널에 흘려보내지 않고 파일에만 저장하며, 완료 후 한글 표시 폭을 보정한 요약 표만 출력합니다.
+
+```bash
+ctf-bench challenge-name
+ctf-bench --source /path/to/challenge challenge-name
+ctf-bench --remote host.example:31337 challenge-name
+ctf-bench challenge-name host.example:31337
+ctf-bench --timeout 2400 --order fast-first challenge-name
+```
+
+로컬 모드는 기존처럼 clean replay와 `.solved=verified`를 성공 조건으로 사용합니다. `--remote` 또는 두 번째 위치 인수로 사용자가 허가한 정확한 `HOST:PORT`를 지정한 원격 모드에서는 다른 주소와 scoreboard 접속을 금지합니다. 실제 원격 응답을 받은 뒤의 `REMOTE_FLAG=<flag>` 표식 또는 내장 원격 하니스 증거를 포착하는 순간 성공으로 기록하고, 프로세스를 중단하며 재검증·writeup·`.solved` 판정은 생략합니다.
+
+결과는 기본적으로 `benchmarks/runs/<run-id>/report.md`와 각 실행의 JSONL 이벤트에 남습니다. 원격 성공 시 토큰은 조기 종료 전까지의 부분 합계일 수 있습니다. `ctf-bench --dry-run challenge-name` 또는 `ctf-bench --dry-run --remote HOST:PORT challenge-name`으로 모델 호출 없이 고정 설정과 범위를 먼저 확인할 수 있습니다.
 
 리버싱 문제의 기본 원본 경로는 `$HOME/ctf-challenges/reversing`입니다. 다른 위치는 `--source` 또는 `CTF_REV_SOURCE`로 지정합니다. 제공된 Dockerfile이 없으면 바이너리를 호스트에서 실행하지 않는 STATIC-ONLY 분석으로 진행합니다.
 
