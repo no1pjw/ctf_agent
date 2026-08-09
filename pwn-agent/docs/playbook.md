@@ -10,9 +10,9 @@
 
 For a multi-stage exploit, create a bounded checkpoint after each primitive: `triage`, `primitive`, `leak`, `arbitrary-read-write`, `control-flow`, `local-flag`, and `remote`. Record only the invariant that passed or failed and the next cheapest discriminator. Keep the latest 20 transitions in `work/state.json`; do not create per-command notes. A resumed run starts by reading this state and matching feedback topics, then retests only the failed stage and its direct prerequisite.
 
-When an official remote endpoint is recorded, switch to Fast-to-Remote as soon as one local exploit run derives a valid local flag. Run the remote solver before a second local success, negative control, P5, detailed evidence work, or write-up. A verified remote flag is the contest completion signal; perform only minimal private evidence saving and cleanup afterward. If the first remote attempt fails, return to the cheapest environment/protocol discriminator and permit one corrected retry.
+When an official remote endpoint is recorded, switch to Fast-to-Remote as soon as the solver is ready. If an exact local runtime exists, one local exploit-derived flag is enough. If no local runtime exists, statically cross-check the primitive, offsets, addresses, and I/O framing, syntax-check the parameterized solver, and make the first bounded remote attempt without waiting for a Dockerfile, cached image, or local flag. Run it before a negative control, P5, detailed evidence work, or write-up. A verified remote flag is the contest completion signal; perform only minimal private evidence saving and cleanup afterward. If the first remote attempt fails, return to the cheapest environment/protocol discriminator and permit one corrected retry.
 
-Before the first remote attempt, retain one capped local-success transcript and the exact libc/runtime provenance. On remote failure, checkpoint the last prompt or invariant reached, keep diagnostic output enabled in the private transcript, and compare only framing, runtime offsets, and the failed invariant. Do not restart static analysis or rewrite an already passed primitive.
+Before the first remote attempt, retain one capped local-success transcript and exact runtime provenance when a local runtime exists. In `STATIC-ONLY`, retain the compact static cross-check instead. On remote failure, checkpoint the last prompt or invariant reached, keep diagnostic output enabled in the private transcript, and compare only framing, runtime offsets, and the failed invariant. Do not restart static analysis or rewrite an already passed primitive.
 
 For a supplied Dockerfile, treat containers and the generated `ctf-<challenge>:local` image as run-scoped resources. The launcher invokes `pwn-cleanup.sh` after Codex exits, including failures and interruptions. Do not call broad prune commands or remove base images. Use `--keep-docker` only when the user explicitly needs post-run debugging.
 
@@ -23,7 +23,7 @@ If no Dockerfile and no matching cached image exist:
 1. Mark the runtime `STATIC-ONLY` and continue immediately with source, `file`, mitigations, symbols, imports, strings, and disassembly.
 2. Do not create an ad-hoc Dockerfile, pull a generic image, retry Docker, or execute the binary on the host.
 3. Do not escalate merely because the Dockerfile is absent. Escalate only for ordinary technical triggers found during analysis.
-4. When a decisive dynamic test is unavoidable, finish the static map first and report the exact required architecture, loader, libc, service command, or other missing runtime component.
+4. If an exact official endpoint is recorded and static analysis is sufficient to complete a parameterized solver, use the bounded remote harness immediately; the missing local runtime is not a blocker. Otherwise, when a decisive dynamic test is unavoidable, finish the static map first and report the exact required architecture, loader, libc, service command, or other missing runtime component.
 
 ## Malformed variadic input
 
@@ -43,7 +43,7 @@ Escalate for source absence, stripped/obfuscated binaries, heap/race/probabilist
 
 When `scope/remote-target.env` records a user-declared official CTF endpoint:
 
-1. Complete local primitive and solver validation before target traffic.
+1. Complete local primitive and solver validation when an exact local runtime exists. Without one, independently cross-check the static exploit chain and syntax-check the solver; do not treat the absent runtime as a prerequisite for the first bounded target attempt.
 2. Parameterize `work/solve.py` with pwntools `REMOTE HOST=<host> PORT=<port>`; never hard-code a second endpoint. Exit nonzero when no valid flag is obtained so the bounded harness can distinguish failure.
 3. Run only through `pwn-remote-run.sh`, with one immediate attempt by default and a second only after a bounded protocol/environment correction. Measure from remote solver start until the first validated `FLAG=` line with the harness monotonic timer.
 4. Do not scan ports, discover adjacent hosts, brute-force ASLR or credentials, persist a shell, pivot, or contact a scoreboard.

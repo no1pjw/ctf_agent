@@ -20,6 +20,7 @@ usage() {
   model               gpt-5.6-sol
   reasoning effort    xhigh
   subagents           disabled
+  automatic skills    disabled (FAST_LOCAL uses concise AGENTS.md)
   Codex mode          exec --ephemeral --ignore-user-config
 
 환경 변수:
@@ -144,7 +145,7 @@ if [[ "$dry_run" == true ]]; then
   printf '실행 방식:        plain Codex + FAST_LOCAL 병렬\n'
   if [[ "$remote_enabled" == true ]]; then
     printf '원격 엔드포인트:  %s:%s (이 주소만 허용)\n' "$remote_host" "$remote_port"
-    printf '성공 판정:        원격 REMOTE_FLAG= 포착 즉시 성공 및 종료\n'
+    printf '성공 판정:        원격 하니스 플래그 포착 즉시 성공 및 종료\n'
   else
     printf '성공 판정:        로컬 clean replay + .solved=verified\n'
   fi
@@ -154,6 +155,7 @@ if [[ "$dry_run" == true ]]; then
   printf '모델:             %s\n' "$model"
   printf '추론 강도:        %s\n' "$reasoning_effort"
   printf '서브에이전트:     비활성화(features.multi_agent=false)\n'
+  printf '자동 스킬 검색:   비활성화(features.skill_search=false)\n'
   printf '세션 저장:        비활성화(--ephemeral)\n'
   exit 0
 fi
@@ -171,15 +173,20 @@ plain_root="$run_root/plain"
 fast_root="$run_root/fast-local"
 plain_input="$plain_root/input"
 plain_work="$plain_root/work"
+plain_scope="$plain_root/scope"
+plain_evidence="$plain_root/evidence/private"
 fast_challenge="$fast_root/challenges/$challenge_name"
 fast_input="$fast_challenge/input"
 fast_work="$fast_challenge/work"
+common_tools="$run_root/tools"
+common_remote_harness="$common_tools/pwn-remote-run.sh"
 image_prefix="ctf-bench-${run_id,,}"
 plain_image="${image_prefix}-plain:local"
 fast_image="${image_prefix}-fast-local:local"
 
-mkdir -p "$plain_input" "$plain_work" "$fast_input" "$fast_work" \
-  "$fast_challenge/evidence/private" "$fast_challenge/scope" "$run_root/metrics"
+mkdir -p "$plain_input" "$plain_work" "$plain_scope" "$plain_evidence" \
+  "$fast_input" "$fast_work" "$fast_challenge/evidence/private" \
+  "$fast_challenge/scope" "$run_root/metrics" "$common_tools"
 
 copy_source() {
   local destination=$1
@@ -192,74 +199,90 @@ copy_source() {
 copy_source "$plain_input"
 copy_source "$fast_input"
 
+printf '%s\n' "$source_path" > "$plain_scope/source-path.txt"
 printf '%s\n' "$source_path" > "$fast_challenge/scope/source-path.txt"
 printf 'pwn\n' > "$fast_challenge/.ctf-category"
 if [[ "$remote_enabled" == true ]]; then
+  cp -a -- "$agent_root/references/tools/pwn-remote-run.sh" "$common_remote_harness"
+  chmod +x "$common_remote_harness"
+  printf 'authorization=user-supplied-ctf-endpoint\ntarget_network=exact-endpoint-only\nremote_host=%s\nremote_port=%s\nscoreboard=denied\n' \
+    "$remote_host" "$remote_port" > "$plain_scope/benchmark.env"
   printf 'authorization=user-supplied-ctf-endpoint\ntarget_network=exact-endpoint-only\nremote_host=%s\nremote_port=%s\nscoreboard=denied\n' \
     "$remote_host" "$remote_port" > "$fast_challenge/scope/benchmark.env"
-  {
+  for scope_file in "$plain_scope/remote-target.env" "$fast_challenge/scope/remote-target.env"; do
+    {
     printf 'authorization=user-declared-official-ctf-endpoint\n'
     printf 'protocol=tcp\n'
     printf 'host=%s\nport=%s\n' "$remote_host" "$remote_port"
-    printf 'allowed_attempts=2\n'
+    printf 'allowed_attempts=1\n'
     printf 'scoreboard_submission=denied\n'
-  } > "$fast_challenge/scope/remote-target.env"
+    } > "$scope_file"
+  done
 else
+  printf 'authorization=user-supplied-local-ctf-artifact\ntarget_network=denied\n' > "$plain_scope/benchmark.env"
   printf 'authorization=user-supplied-local-ctf-artifact\ntarget_network=denied\n' > "$fast_challenge/scope/benchmark.env"
+  rm -f -- "$plain_scope/remote-target.env"
   rm -f -- "$fast_challenge/scope/remote-target.env"
 fi
 
-# FAST_LOCAL gets the project policy, skill, feedback and deterministic tools.
-# The plain workspace intentionally has none of these links.
-ln -s "$agent_root/shimes/AGENTS.md" "$fast_root/AGENTS.md"
+# FAST_LOCAL can use the project knowledge and tools, but its benchmark policy
+# deliberately avoids preloading the full P0-P6 document tree.
 ln -s "$agent_root/rules" "$fast_root/rules"
 ln -s "$agent_root/pwn-agent" "$fast_root/pwn-agent"
 ln -s "$agent_root/references" "$fast_root/references"
 cp -a -- "$agent_root/state" "$fast_root/state"
 
+cat > "$fast_root/AGENTS.md" <<'EOF'
+# FAST_LOCAL benchmark
+
+Solve the supplied authorized CTF pwn challenge immediately. Do not preload the
+full policy, phase, role, or feedback document tree. Use the linked pwn tools and
+open only the one feedback topic that directly matches a concrete blocker.
+Never use subagents. Preserve inputs and never execute the challenge binary on
+the host. For an exact recorded remote endpoint, a missing Dockerfile, cached
+image, or local flag is not a prerequisite: once static analysis completes a
+syntax-valid parameterized solver, run its remote branch once through the
+provided bounded harness. Stop immediately when that harness obtains a flag.
+EOF
+
 if [[ "$remote_enabled" == true ]]; then
-  network_rule=$(printf '%s\n' \
-    "- 원격 접속은 사용자가 허가한 정확한 TCP 엔드포인트 '$remote_host:$remote_port'에만 허용한다." \
-    '- 다른 호스트·포트 탐색, 스캔, 인접 서비스 접속 및 대회 플랫폼/scoreboard 접속은 금지한다.' \
-    '- 문제 바이너리는 호스트에서 실행하지 말고 Docker 격리 안에서만 실행하라.')
-  plain_completion_rule=$(printf '%s\n' \
-    '- 정확한 원격 엔드포인트의 실제 응답에서 형식이 유효한 플래그를 받는 즉시 `REMOTE_FLAG=<받은 플래그>` 한 줄만 출력하고 바로 종료하라.' \
-    '- 원격 플래그를 받은 뒤에는 재검증, clean replay, writeup 보완, `.solved` 작성 등 모든 후속 작업을 생략하라.' \
-    '- 로컬 플래그, 추측값, 예시 문자열에는 절대로 `REMOTE_FLAG=` 표식을 사용하지 마라.')
-  fast_completion_rule=$plain_completion_rule
-  final_answer_rule='- 원격 플래그를 얻지 못한 채 종료할 때만 현재 상태와 정확한 차단 원인을 간단히 보고하라.'
+  task_title="허가된 CTF pwn 문제 '$challenge_name'을 풀어 '$remote_host:$remote_port'에서 플래그를 구하라."
+  remote_rule=$(cat <<EOF
+- 원격은 정확히 TCP $remote_host:$remote_port 한 곳만 허용한다. 스캔, 다른 주소, scoreboard 접속은 금지한다.
+- Dockerfile, 캐시 이미지, 로컬 실행이나 로컬 플래그는 원격 시도의 선행조건이 아니다. 런타임이 없으면 정적으로 exploit을 완성하고 바로 원격으로 시도하라.
+- 문제 바이너리는 호스트에서 실행하지 마라. 직접 작성한 원격 client는 정확한 허가 endpoint에 한해 호스트에서 실행해도 된다.
+- solver가 준비되면 다음 공용 하니스로 원격 branch를 즉시 1회 실행하라. 하니스가 REMOTE/HOST/PORT 인자를 자동으로 덧붙인다.
+  "\$CTF_REMOTE_HARNESS" --host "\$CTF_REMOTE_HOST" --port "\$CTF_REMOTE_PORT" --timeout 30 --attempts 1 --output "\$CTF_REMOTE_TRANSCRIPT" -- <solver command>
+- solver는 실제 원격 응답에서 플래그를 얻었을 때만 \`FLAG=<원문>\` 한 줄을 출력하고 즉시 종료해야 한다.
+- 플래그를 받으면 하니스 출력 직후 모든 검증, writeup, \`.solved\` 작업을 중단하고 종료하라. 실패하면 원인만 짧게 보고하라.
+EOF
+)
+  plain_execution_rule=$remote_rule
+  fast_execution_rule=$remote_rule
 else
-  network_rule='- 대상 네트워크 접속, 호스트에서 문제 바이너리 실행, 플래그 자동 제출은 금지한다.'
-  plain_completion_rule='- exploit 경로로 플래그를 clean replay에서 재현한 경우에만 work/.solved에 verified 한 줄을 기록하라.'
-  fast_completion_rule="- exploit 경로로 플래그를 clean replay에서 재현한 경우에만 challenges/$challenge_name/work/.solved에 verified 한 줄을 기록하라."
-  final_answer_rule='- 최종 답변에는 성공 여부, 검증 근거와 플래그 후보를 포함하라.'
+  task_title="허가된 로컬 CTF pwn 문제 '$challenge_name'을 풀어 플래그를 구하라."
+  plain_execution_rule='- 대상 네트워크 접속은 금지한다. challenge 실행은 Docker 격리 안에서만 수행하라.
+- exploit로 플래그를 재현한 경우 work/.solved에 verified 한 줄을 기록하라.'
+  fast_execution_rule="- 대상 네트워크 접속은 금지한다. challenge 실행은 Docker 격리 안에서만 수행하라.
+- exploit로 플래그를 재현한 경우 challenges/$challenge_name/work/.solved에 verified 한 줄을 기록하라."
 fi
 
 cat > "$run_root/plain.prompt.txt" <<EOF
-허가된 로컬 CTF pwn 문제 '$challenge_name'을 해결하라.
+$task_title
 
-- 입력은 input/에 있으며 원본은 수정하지 마라.
-- 결과는 work/solve.py와 work/writeup.md에 작성하라.
-- 문제 파일은 신뢰할 수 없으므로 정적으로 먼저 확인하고, 실행은 Docker 격리 안에서만 수행하라.
-- Docker 이미지가 필요하면 정확히 '$plain_image' 태그만 사용하고 다른 벤치마크 이미지나 컨테이너를 재사용하지 마라.
-$network_rule
-- 서브에이전트나 다른 에이전트를 호출하지 말고 현재 에이전트가 직접 수행하라.
-$plain_completion_rule
-$final_answer_rule
+- 입력은 input/이다. 원본은 수정하지 마라.
+- 그냥 바로 풀어라. CTF 스킬·에이전트·정책 문서를 먼저 읽거나 진행 기록과 writeup을 만들지 마라.
+- 필요한 exploit은 work/solve.py에 작성하라. 서브에이전트는 사용하지 마라.
+$plain_execution_rule
 EOF
 
 cat > "$run_root/fast-local.prompt.txt" <<EOF
-허가된 로컬 CTF pwn 문제 '$challenge_name'을 FAST_LOCAL 방식으로 해결하라.
+$task_title
 
-- 시작 전에 AGENTS.md, rules/ruleset.md, pwn-agent/skills/SKILL.md, pwn-agent/docs/HARD_RULES.md, pwn-agent/docs/role.md, pwn-agent/docs/playbook.md를 읽고 적용하라.
-- 입력은 challenges/$challenge_name/input에 있으며 원본은 수정하지 마라.
-- 결과는 challenges/$challenge_name/work/solve.py와 challenges/$challenge_name/work/writeup.md에 작성하라.
-$network_rule
-- Docker 이미지가 필요하면 references/tools/pwn-build.sh로 정확히 '$fast_image'를 만들고 이 이미지에만 pwn-run.sh를 사용하라.
-- 멀티에이전트 기능은 비활성화되어 있다. 서브에이전트를 호출하거나 활성화를 요청하지 말고 현재 에이전트가 모든 단계를 직접 수행하라.
-$fast_completion_rule
-- 프로젝트 정책, 피드백과 references/tools의 하니스를 사용하되 이 지식·정책·도구 파일 자체는 수정하지 마라.
-$final_answer_rule
+- 입력은 challenges/$challenge_name/input이다. 원본은 수정하지 마라.
+- 그냥 바로 풀어라. AGENTS.md 외 문서를 시작 전에 순회하지 말고, 막힌 증상과 정확히 맞는 피드백 하나만 필요할 때 확인하라.
+- 필요한 exploit은 challenges/$challenge_name/work/solve.py에 작성하라. 서브에이전트는 사용하지 마라.
+$fast_execution_rule
 EOF
 
 stop_process_group() {
@@ -303,11 +326,14 @@ run_variant() {
     env CTF_AGENT_ROOT="$workspace" CTF_BENCH_WORK_DIR="$work_dir" \
       CTF_BENCH_DOCKER_IMAGE="$docker_image" CTF_BENCH_REMOTE="$remote_enabled" \
       CTF_REMOTE_HOST="$remote_host" CTF_REMOTE_PORT="$remote_port" \
+      CTF_REMOTE_HARNESS="$common_remote_harness" CTF_REMOTE_ATTEMPTS=1 \
+      CTF_REMOTE_TRANSCRIPT="$work_dir/remote-transcript.txt" \
     "$codex_bin" exec --ephemeral --ignore-user-config --skip-git-repo-check \
       -C "$workspace" --model "$model" \
       -c "model_reasoning_effort=\"$reasoning_effort\"" \
       -c 'approval_policy="never"' \
-      --disable multi_agent --sandbox danger-full-access --json - \
+      --disable multi_agent --disable skill_search \
+      --sandbox danger-full-access --json - \
       < "$prompt_file" > "$fifo_file" 2> "$stderr_file" &
   codex_pid=$!
   python3 "$metrics_py" capture "${capture_options[@]}" < "$fifo_file"

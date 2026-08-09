@@ -4,13 +4,6 @@
 
 입력 기반 exploit에서는 값뿐 아니라 delimiter, newline, EOF 및 socket half-close의 위치도 명시적으로 설계한다. 성공한 입력 프레이밍은 `solve.py`에 그대로 표현하고 timeout을 둔다.
 
-## formatted input 뒤의 raw read
-
-- **증상:** 메뉴와 숫자는 `scanf`류로 받고 payload는 `read(0, ...)`로 받기 때문에, 남은 newline이나 한 번에 보낸 다음 명령이 payload로 흡수된다.
-- **재사용 가능한 교훈:** 숫자와 delimiter를 먼저 보내고 raw-input prompt를 수신한 뒤 payload를 별도 전송한다. prompt를 프로토콜 프레이밍 장벽으로 사용하면 stdio buffering과 커널 read 경계를 추측할 필요가 줄어든다.
-- **가장 싼 확인법:** 짧고 식별 가능한 payload 뒤에 다음 메뉴 입력을 붙여 보내는 경우와, prompt 확인 후 분리 전송하는 경우를 각각 한 번 비교해 저장·에코 길이를 본다.
-- **환경/적용 한계:** prompt가 실제 raw read 전에 flush되어야 한다. 출력 buffering으로 prompt가 보이지 않거나 프로그램이 고정 길이를 모두 기다리면 delimiter와 정확한 전송 길이를 별도로 모델링해야 한다.
-
 ## Malformed variadic input
 
 - `scanf` 계열 포맷의 변환 지정자 수가 전달된 포인터 수보다 많으면 undefined behavior다.
@@ -34,4 +27,4 @@
 
 ## 환경 경계
 
-Malformed variadic 호출은 libc 구현과 호출 시점의 레지스터·스택 상태에 의존한다. 원격 endpoint가 없으면 공식 Docker 환경에서 성공 2회와 음성 대조군 1회를 확인한다. 공식 원격 endpoint가 있으면 exploit으로 로컬 플래그를 1회 얻는 즉시 Fast-to-Remote를 먼저 수행하고, 반복 성공과 음성 대조군은 원격 실패 시에만 진행한다. 무관한 libc 버전으로 일반화하지 않는다.
+Malformed variadic 호출은 libc 구현과 호출 시점의 레지스터·스택 상태에 의존한다. 원격 endpoint가 없으면 공식 Docker 환경에서 성공 2회와 음성 대조군 1회를 확인한다. 공식 원격 endpoint가 있으면 정확한 로컬 런타임이 있을 때는 로컬 플래그 1회 후, 없을 때는 정적 계약·프레이밍 교차 확인과 solver 문법 검사 후 Fast-to-Remote를 먼저 수행한다. 반복 성공과 음성 대조군은 원격 실패 시에만 진행하며 무관한 libc 버전으로 일반화하지 않는다.

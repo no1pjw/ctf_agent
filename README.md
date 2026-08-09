@@ -48,7 +48,7 @@ ctf-clean --caches --apply
 
 ## 벤치마크
 
-`ctf-bench`는 같은 pwn 문제를 `plain Codex`와 `FAST_LOCAL`의 격리된 작업공간에서 동시에 실행합니다. 두 실행 모두 `gpt-5.6-sol`, `xhigh`, 멀티에이전트 비활성화 및 ephemeral non-interactive 모드를 강제하며, 실행별 Docker 이미지 이름과 이벤트 로그를 분리합니다. 진행 중 이벤트는 터미널에 흘려보내지 않고 파일에만 저장하며, 완료 후 한글 표시 폭을 보정한 요약 표만 출력합니다.
+`ctf-bench`는 같은 pwn 문제를 `plain Codex`와 `FAST_LOCAL`의 격리된 작업공간에서 동시에 실행합니다. 두 실행 모두 `gpt-5.6-sol`, `xhigh`, 멀티에이전트·자동 스킬 검색 비활성화 및 ephemeral non-interactive 모드를 강제하며, 실행별 Docker 이미지 이름과 이벤트 로그를 분리합니다. 벤치마크 프롬프트는 “문제를 바로 풀어 플래그를 구하라”는 짧은 계약만 사용합니다. plain은 CTF 정책·스킬 문서를 미리 읽지 않고, FAST_LOCAL은 자동 생성된 간결한 `AGENTS.md`를 적용하되 전체 P0-P6 문서 트리를 선행 로드하지 않으며 막힌 증상과 맞는 피드백만 선택적으로 사용합니다. 진행 중 이벤트는 터미널에 흘려보내지 않고 파일에만 저장하며, 완료 후 한글 표시 폭을 보정한 요약 표만 출력합니다.
 
 ```bash
 ctf-bench challenge-name
@@ -58,7 +58,7 @@ ctf-bench challenge-name host.example:31337
 ctf-bench --timeout 2400 --order fast-first challenge-name
 ```
 
-로컬 모드는 기존처럼 clean replay와 `.solved=verified`를 성공 조건으로 사용합니다. `--remote` 또는 두 번째 위치 인수로 사용자가 허가한 정확한 `HOST:PORT`를 지정한 원격 모드에서는 다른 주소와 scoreboard 접속을 금지합니다. 실제 원격 응답을 받은 뒤의 `REMOTE_FLAG=<flag>` 표식 또는 내장 원격 하니스 증거를 포착하는 순간 성공으로 기록하고, 프로세스를 중단하며 재검증·writeup·`.solved` 판정은 생략합니다.
+로컬 모드는 기존처럼 clean replay와 `.solved=verified`를 성공 조건으로 사용합니다. `--remote` 또는 두 번째 위치 인수로 사용자가 허가한 정확한 `HOST:PORT`를 지정한 원격 모드에서는 다른 주소와 scoreboard 접속을 금지합니다. Dockerfile·캐시 이미지·로컬 플래그가 없어도 정적으로 parameterized solver가 완성되면 공용 원격 하니스로 variant당 즉시 1회 실행합니다. 하니스가 실제 원격 플래그를 포착하는 순간 성공으로 기록하고 프로세스를 중단하며 재검증·writeup·`.solved` 판정은 생략합니다.
 
 결과는 기본적으로 `benchmarks/runs/<run-id>/report.md`와 각 실행의 JSONL 이벤트에 남습니다. 원격 성공 시 토큰은 조기 종료 전까지의 부분 합계일 수 있습니다. `ctf-bench --dry-run challenge-name` 또는 `ctf-bench --dry-run --remote HOST:PORT challenge-name`으로 모델 호출 없이 고정 설정과 범위를 먼저 확인할 수 있습니다.
 
@@ -74,7 +74,7 @@ WSL 내부 파일을 삭제해도 `ext4.vhdx`의 Windows 실제 크기가 줄지
 powershell -ExecutionPolicy Bypass -File .\references\tools\ctf-compact-wsl.ps1
 ```
 
-공식 CTF pwn 서비스 주소를 함께 주면 로컬 exploit이 플래그를 한 번 재현하는 즉시 반복 검증이나 write-up보다 원격 실행을 먼저 수행합니다. 검증된 원격 플래그와 실행 시작부터 수신까지의 시간은 즉시 `획득한 플래그: ...`, `원격 플래그 획득 시간: N.NNN초`로 출력하고 `challenges/<name>/evidence/private/`에도 저장합니다. 첫 원격 시도가 실패할 때만 차이를 분석해 수정된 exploit으로 한 번 더 시도합니다. 공개 write-up에서는 원문을 가리며 scoreboard에는 자동 제출하지 않습니다. 주소를 생략하면 대상 네트워크는 계속 차단됩니다.
+공식 CTF pwn 서비스 주소를 함께 주면 정확한 로컬 런타임이 있을 때는 로컬 플래그 한 번 후, 없을 때는 정적 exploit chain 교차 확인과 solver 문법 검사 후 반복 검증이나 write-up보다 원격 실행을 먼저 수행합니다. Dockerfile·캐시 이미지·로컬 플래그 부재는 첫 원격 시도의 blocker가 아닙니다. 검증된 원격 플래그와 실행 시작부터 수신까지의 시간은 즉시 `획득한 플래그: ...`, `원격 플래그 획득 시간: N.NNN초`로 출력하고 `challenges/<name>/evidence/private/`에도 저장합니다. 첫 원격 시도가 실패할 때만 차이를 분석해 수정된 exploit으로 한 번 더 시도합니다. 공개 write-up에서는 원문을 가리며 scoreboard에는 자동 제출하지 않습니다. 주소를 생략하면 대상 네트워크는 계속 차단됩니다.
 
 Dockerfile이 제공된 문제는 풀이의 성공·실패·중단 여부와 관계없이 종료할 때 해당 문제 컨테이너와 `ctf-<challenge>:local` 이미지를 자동 삭제합니다. 디버깅을 위해 보존해야 할 때만 `--keep-docker`를 지정합니다. 다른 이미지, 컨테이너, 볼륨과 base image는 삭제하지 않습니다.
 

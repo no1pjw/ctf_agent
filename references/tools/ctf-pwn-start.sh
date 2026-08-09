@@ -20,8 +20,8 @@ usage() {
   --prepare-only  Codex 실행 없이 파일 복사 및 작업 디렉터리 준비
 
 원격 대상:
-  문제 이름 뒤에 공식 CTF 서비스 주소를 지정하면 로컬 검증 후 완성된
-  work/solve.py를 그 주소에만 제한 실행하여 플래그 후보를 수집합니다.
+  문제 이름 뒤에 공식 CTF 서비스 주소를 지정하면 완성된 work/solve.py를
+  그 주소에만 제한 실행합니다. 로컬 런타임이 없으면 정적 교차 확인 후 바로 시도합니다.
   예: ctf-pwn cherry host3.dreamhack.games:12345
 
 환경 변수:
@@ -153,7 +153,7 @@ case "$solve_mode" in
     mode_prompt=$(cat <<'EOF'
 실행 모드는 ADAPTIVE다. P0-Lite에서 허가 범위, 파일 목록, 대상/빌드/런타임 네트워크 구분을 확인하고 P1은 이미 pwn으로 분류된 것으로 처리하라. 빠른 탐색은 약 10분, 주요 도구 호출 8회, 가설 3개, 익스플로잇 실패 2회로 제한한다. pwn-triage.sh는 한 번만 실행하고 사용 가능한 런타임이 있을 때만 캐시된 Docker 이미지를 재사용하라. 저비용 검사 2회가 실패하기 전에는 GDB를 사용하지 말고 notes/todo/명령 로그를 계속 갱신하지 마라.
 
-공식 원격 endpoint가 없고 동적 런타임이 있으면 재현 가능한 solve.py의 깨끗한 Docker 성공 2회와 음성 대조군 1회를 기존 P4 증거로 P5-Lite에 전달하라. 공식 원격 endpoint가 있으면 아래 Fast-to-Remote 규칙이 이 반복 검증보다 우선한다. 런타임이 없으면 아래 STATIC-ONLY 검증 규칙을 적용한다. 소스 부재, stripped 또는 강한 난독화, heap/race/확률적 동작, 런타임 외의 프로토콜 불확실성, 로컬과 공식 환경의 차이, 익스플로잇 2회 실패 또는 빠른 탐색 예산 소진이 발생하면 작업을 재시작하지 말고 전체 P0~P6으로 전환하라.
+공식 원격 endpoint가 없고 동적 런타임이 있으면 재현 가능한 solve.py의 깨끗한 Docker 성공 2회와 음성 대조군 1회를 기존 P4 증거로 P5-Lite에 전달하라. 공식 원격 endpoint가 있으면 아래 Fast-to-Remote 규칙이 이 반복 검증보다 우선한다. 런타임이 없더라도 정적으로 exploit chain과 solver를 완성할 수 있으면 원격 첫 시도를 막지 말고, 그 외에는 아래 STATIC-ONLY 검증 규칙을 적용한다. 소스 부재, stripped 또는 강한 난독화, heap/race/확률적 동작, 런타임 외의 프로토콜 불확실성, 로컬과 공식 환경의 차이, 익스플로잇 2회 실패 또는 빠른 탐색 예산 소진이 발생하면 작업을 재시작하지 말고 전체 P0~P6으로 전환하라.
 EOF
 )
     ;;
@@ -173,6 +173,9 @@ esac
 
 if [[ "$runtime_mode" == static-only ]]; then
   mode_prompt+=$'\nSTATIC-ONLY에서는 Docker 성공 2회 조건을 적용하지 않는다. 대신 source/disassembly에서 primitive와 계산을 독립적으로 교차 확인하고, 실행 없이 증명 가능한 범위까지 solver를 작성하라. 동적 검증이 없어 확정할 수 없는 부분만 명확히 표시하라.'
+  if [[ -n "$remote_host" ]]; then
+    mode_prompt+=$'\n공식 원격 endpoint가 있으므로 Dockerfile·캐시 이미지·로컬 플래그를 선행조건으로 삼지 마라. 정적으로 exploit chain과 I/O framing을 교차 확인하고 solver 문법 검사를 마치면 challenge 바이너리를 호스트에서 실행하지 않은 채 remote client branch만 bounded harness로 즉시 실행하라.'
+  fi
   input_prompt="잘못된 scanf/printf 계열 가변 인자 호출은 변환 지정자 수와 전달된 포인터 수를 정적으로 비교하고 필요한 delimiter/EOF/half-close 프레이밍을 solver에 명시하라. 컨테이너가 없다는 이유로 기다리거나 임의 환경에서 동작을 일반화하지 마라."
 else
   input_prompt="잘못된 scanf/printf 계열 가변 인자 호출은 변환 지정자 수와 전달된 포인터 수를 비교하고, 광범위한 libc 분석 전에 공식 컨테이너에서 제한된 구분자/EOF/half-close 조합을 검사하라. 제공된 Docker 환경을 기준으로 삼고 무관한 libc 버전까지 호환성을 증명하려 하지 마라."
@@ -204,7 +207,11 @@ case "$runtime_mode" in
     compact_runtime="Dockerfile은 없으므로 재빌드하지 말고 캐시 이미지 $image_name만 하니스로 사용하라."
     ;;
   static-only)
-    compact_runtime="Dockerfile과 캐시 이미지가 없으므로 즉시 STATIC-ONLY로 계속하라. Docker 재시도·임시 환경 생성·호스트 실행은 금지하며, 동적 검증이 꼭 필요할 때만 정확한 blocker를 남겨라."
+    if [[ -n "$remote_host" ]]; then
+      compact_runtime="Dockerfile과 캐시 이미지가 없으므로 STATIC-ONLY로 분석하되, 정적 exploit과 solver가 완성되면 로컬 실행 없이 정확한 공식 endpoint에 bounded remote client를 즉시 실행하라. challenge 바이너리의 호스트 실행은 금지한다."
+    else
+      compact_runtime="Dockerfile과 캐시 이미지가 없으므로 즉시 STATIC-ONLY로 계속하라. Docker 재시도·임시 환경 생성·호스트 실행은 금지하며, 동적 검증이 꼭 필요할 때만 정확한 blocker를 남겨라."
+    fi
     ;;
 esac
 
@@ -221,7 +228,7 @@ prompt=$(cat <<EOF
 - 결과: 한국어로 진행하며 work/solve.py와 간결한 work/writeup.md만 기본 생성
 - 완료 표식: 로컬 또는 공식 원격에서 플래그를 실제 검증한 뒤에만 work/.solved에 verified 한 줄을 기록
 - 기억: 시작 시 work/state.json과 pwn-agent/feedback/index.md를 먼저 읽고, 복합 exploit은 pwn-checkpoint.sh로 결정적 단계만 기록하여 마지막 실패 단계부터 재개
-- 로그: 첫 원격 시도 전 1MiB 이하의 로컬 성공 transcript와 libc/runtime 출처를 남기고, 원격 로그도 기본 1MiB 상한을 지켜라
+- 로그: 로컬 런타임이 있으면 첫 원격 시도 전 1MiB 이하의 로컬 성공 transcript와 runtime 출처를 남기고, 없으면 간결한 정적 교차 확인만 남겨라. 원격 로그는 기본 1MiB 상한을 지켜라
 EOF
 )
 
@@ -233,8 +240,8 @@ if [[ -n "$remote_host" ]]; then
   prompt+=$(cat <<EOF
 
 - 공식 원격 범위: TCP $remote_host:$remote_port 한 곳만 사용 허가됨
-- Fast-to-Remote: 로컬에서 solve.py가 exploit 경로로 유효한 플래그를 1회 얻는 즉시 두 번째 로컬 성공, 음성 대조군, P5 및 write-up을 기다리지 말고 references/tools/pwn-remote-run.sh로 원격 exploit을 실행하라. 대회에서는 원격 플래그 획득이 최우선이다.
-- 원격 절차: work/solve.py를 pwntools 표준 인자 REMOTE HOST=$remote_host PORT=$remote_port와 호환되게 하고 첫 원격 시도를 즉시 수행하라. 실패한 경우에만 환경 차이를 분석하고 수정된 exploit으로 두 번째 시도를 허용한다.
+- Fast-to-Remote: 정확한 로컬 런타임이 있으면 로컬 플래그 1회 후, 없으면 정적 primitive·offset·주소·I/O framing 교차 확인과 solver 문법 검사 후 즉시 references/tools/pwn-remote-run.sh로 첫 원격 exploit을 실행하라. Dockerfile·캐시 이미지·로컬 플래그는 런타임 부재 시 선행조건이 아니다. 두 번째 로컬 성공, 음성 대조군, P5 및 write-up을 기다리지 마라.
+- 원격 절차: work/solve.py를 pwntools 표준 인자 REMOTE HOST=$remote_host PORT=$remote_port와 호환되게 하고 첫 원격 시도를 즉시 수행하라. challenge 바이너리는 호스트에서 실행하지 않되 생성한 remote client는 이 endpoint에 한해 실행할 수 있다. 실패한 경우에만 환경 차이를 분석하고 수정된 exploit으로 두 번째 시도를 허용한다.
 - 플래그 출력: solve.py는 challenge의 flag format으로 검증한 플래그를 얻었을 때만 FLAG=<원문> 한 줄을 stdout에 출력하고 즉시 연결을 닫고 종료하라. 하니스가 출력하는 '획득한 플래그: <원문>'과 '원격 플래그 획득 시간: N.NNN초'를 즉시 사용자에게 보여 주고 최종 답변에도 둘 다 포함하라. 파일 경로만 알려 주거나 출력을 P5까지 미루지 마라.
 - 원격 증거: 결정적 transcript와 플래그 후보를 evidence/private에 저장하고 공개용 writeup에는 플래그 원문을 넣지 마라. 실패하면 무차별 대입·포트 탐색·다른 호스트 접속 없이 차이와 blocker만 보고하라.
 EOF
