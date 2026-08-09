@@ -8,7 +8,11 @@
 4. Build one primitive at a time and attempt at most two candidate exploits before Deep escalation.
 5. Avoid GDB until two cheaper tests fail or the exact offset/state remains genuinely ambiguous.
 
+For a multi-stage exploit, create a bounded checkpoint after each primitive: `triage`, `primitive`, `leak`, `arbitrary-read-write`, `control-flow`, `local-flag`, and `remote`. Record only the invariant that passed or failed and the next cheapest discriminator. Keep the latest 20 transitions in `work/state.json`; do not create per-command notes. A resumed run starts by reading this state and matching feedback topics, then retests only the failed stage and its direct prerequisite.
+
 When an official remote endpoint is recorded, switch to Fast-to-Remote as soon as one local exploit run derives a valid local flag. Run the remote solver before a second local success, negative control, P5, detailed evidence work, or write-up. A verified remote flag is the contest completion signal; perform only minimal private evidence saving and cleanup afterward. If the first remote attempt fails, return to the cheapest environment/protocol discriminator and permit one corrected retry.
+
+Before the first remote attempt, retain one capped local-success transcript and the exact libc/runtime provenance. On remote failure, checkpoint the last prompt or invariant reached, keep diagnostic output enabled in the private transcript, and compare only framing, runtime offsets, and the failed invariant. Do not restart static analysis or rewrite an already passed primitive.
 
 For a supplied Dockerfile, treat containers and the generated `ctf-<challenge>:local` image as run-scoped resources. The launcher invokes `pwn-cleanup.sh` after Codex exits, including failures and interruptions. Do not call broad prune commands or remove base images. Use `--keep-docker` only when the user explicitly needs post-run debugging.
 

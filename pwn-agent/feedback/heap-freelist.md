@@ -7,6 +7,13 @@
 - **가장 싼 확인법:** 동일 size class의 항목을 순서대로 해제한 뒤 마지막 항목의 첫 word가 주소 정렬에 맞는 작은 값인지 확인한다. 그 값으로 인코딩한 후보를 한 번만 할당해 예상 freelist 전이가 일어나는지 검증한다.
 - **환경/적용 한계:** 인코딩식과 freelist 구조는 allocator·libc 버전에 종속된다. link 저장 위치가 서로 다른 페이지라면 한 항목에서 얻은 값을 다른 항목에 그대로 재사용할 수 없다. tcache와 fastbin의 포화 상태도 따로 추적한다.
 
+## encoded NULL과 인접 link로 페이지 내 주소를 유일화한다
+
+- **증상:** safe-linking freelist의 tail과 그 앞 노드를 함께 읽을 수 있지만, encoded NULL로는 link 저장 위치의 페이지만 복원된다.
+- **재사용 가능한 교훈:** 두 노드의 간격이나 size class가 알려져 있다면, 정렬된 페이지 내 후보를 열거해 `후보 next 주소 XOR link 위치에서 유도된 값 == 저장된 encoded link`를 만족하는 배치를 찾을 수 있다. 별도 full heap pointer leak 없이도 정확한 chunk 주소가 유일해질 수 있다.
+- **가장 싼 확인법:** 한 페이지의 allocator 정렬 후보만 순회하고 알려진 chunk 간격을 적용해 식을 만족하는 해의 개수를 센다. 해가 정확히 하나가 아니면 exploit을 진행하지 않는다.
+- **환경/적용 한계:** 인코딩식, link 필드 위치, chunk 간격이 정확해야 한다. 후보 노드가 페이지 경계를 넘거나 allocator가 추가 tagging·randomization을 쓰면 탐색식과 범위를 다시 세워야 한다.
+
 ## `calloc`도 allocator 경로를 별도로 검증한다
 
 - **증상:** tcache가 찬 상태에서 fastbin을 조작했지만, `malloc` 계열 호출이 먼저 tcache를 소비해 의도한 poisoned chain에 닿지 않는다.

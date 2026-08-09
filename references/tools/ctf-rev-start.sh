@@ -23,6 +23,8 @@ usage() {
   CTF_AGENT_ROOT       설치된 ctf-agent 루트
   CTF_MIN_HOST_FREE_MB Windows 호스트 최소 여유 공간(MiB, 기본 4096)
   CODEX_BIN            Codex CLI 경로
+  CTF_CODEX_MODEL      문제 풀이 모델(기본 gpt-5.6-sol)
+  CTF_CODEX_REASONING_EFFORT  추론 강도(기본 ultra)
 EOF
 }
 
@@ -71,6 +73,8 @@ scope_dir="$challenge_dir/scope"
 evidence_dir="$challenge_dir/evidence"
 tools_dir="$agent_root/references/tools"
 codex_bin=${CODEX_BIN:-}
+codex_model=${CTF_CODEX_MODEL:-gpt-5.6-sol}
+codex_reasoning_effort=${CTF_CODEX_REASONING_EFFORT:-ultra}
 image_slug=$(printf '%s' "$challenge_name" | tr '[:upper:]_.' '[:lower:]--')
 image_name="ctf-rev-$image_slug:local"
 
@@ -112,8 +116,9 @@ EOF
 )
 
 if [[ "$action" == dry-run ]]; then
-  printf '원본 폴더: %s\n원본 ZIP: %s\n작업 경로: %s\n모드: %s\n런타임: %s\n완료 후 정리: %s\n\n%s\n' \
+  printf '원본 폴더: %s\n원본 ZIP: %s\n작업 경로: %s\n모드: %s\n런타임: %s\nCodex 모델: %s\n추론 강도: %s\n완료 후 정리: %s\n\n%s\n' \
     "$source_dir" "$source_zip" "$challenge_dir" "$solve_mode" "$runtime_mode" \
+    "$codex_model" "$codex_reasoning_effort" \
     "$([[ "$keep_workspace" == true ]] && printf '보존' || printf '자동')" "$prompt"
   exit 0
 fi
@@ -165,7 +170,9 @@ trap 'exit 143' TERM
 trap 'exit 129' HUP
 
 set +e
-"$codex_bin" -C "$agent_root" --sandbox danger-full-access --ask-for-approval never "$prompt"
+"$codex_bin" -C "$agent_root" --model "$codex_model" \
+  -c "model_reasoning_effort=\"$codex_reasoning_effort\"" \
+  --sandbox danger-full-access --ask-for-approval never "$prompt"
 status=$?
 set -e
 exit "$status"

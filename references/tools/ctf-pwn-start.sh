@@ -29,6 +29,8 @@ usage() {
   CTF_AGENT_ROOT      설치된 ctf-agent 루트
   CODEX_BIN           Codex CLI의 명시적 경로
   CTF_MIN_HOST_FREE_MB 실행 전 필요한 Windows 호스트 최소 여유 공간(MiB, 기본 4096)
+  CTF_CODEX_MODEL     문제 풀이 모델(기본 gpt-5.6-sol)
+  CTF_CODEX_REASONING_EFFORT  추론 강도(기본 ultra)
 EOF
 }
 
@@ -120,6 +122,8 @@ tools_dir="$agent_root/references/tools"
 image_slug="$(printf '%s' "$challenge_name" | tr '[:upper:]_.' '[:lower:]--')"
 image_name="ctf-$image_slug:local"
 codex_bin=${CODEX_BIN:-}
+codex_model=${CTF_CODEX_MODEL:-gpt-5.6-sol}
+codex_reasoning_effort=${CTF_CODEX_REASONING_EFFORT:-ultra}
 
 if [[ -f "$source_dir/Dockerfile" || -f "$input_dir/Dockerfile" ]]; then
   runtime_mode=supplied-docker
@@ -216,6 +220,8 @@ prompt=$(cat <<EOF
 - 정리: Dockerfile 기반 문제의 컨테이너와 $image_name 이미지는 Codex 종료 후 런처가 자동 정리함
 - 결과: 한국어로 진행하며 work/solve.py와 간결한 work/writeup.md만 기본 생성
 - 완료 표식: 로컬 또는 공식 원격에서 플래그를 실제 검증한 뒤에만 work/.solved에 verified 한 줄을 기록
+- 기억: 시작 시 work/state.json과 pwn-agent/feedback/index.md를 먼저 읽고, 복합 exploit은 pwn-checkpoint.sh로 결정적 단계만 기록하여 마지막 실패 단계부터 재개
+- 로그: 첫 원격 시도 전 1MiB 이하의 로컬 성공 transcript와 libc/runtime 출처를 남기고, 원격 로그도 기본 1MiB 상한을 지켜라
 EOF
 )
 
@@ -264,6 +270,8 @@ if [[ "$action" == dry-run ]]; then
   printf '감사 로그:        %s\n' "$audit_enabled"
   printf 'Codex 샌드박스:   %s\n' "$sandbox_mode"
   printf '승인 정책:        %s\n' "$approval_policy"
+  printf 'Codex 모델:       %s\n' "$codex_model"
+  printf '추론 강도:        %s\n' "$codex_reasoning_effort"
   printf '완료 후 작업공간 정리: %s\n' "$([[ "$keep_workspace" == true ]] && printf '보존' || printf '자동')"
   if [[ -n "$remote_host" ]]; then
     printf '공식 원격 대상:   %s:%s\n' "$remote_host" "$remote_port"
@@ -309,6 +317,9 @@ else
   cp -a --update=none -- "$source_zip" "$input_dir"/
 fi
 printf '문제 준비 완료: %s\n' "$challenge_dir"
+if [[ ! -f "$work_dir/state.json" && -x "$tools_dir/pwn-checkpoint.sh" ]]; then
+  CTF_AGENT_ROOT="$agent_root" "$tools_dir/pwn-checkpoint.sh" "$challenge_name" setup active "mode=$solve_mode runtime=$runtime_mode" >/dev/null
+fi
 
 audit_dir=
 if [[ "$audit_enabled" == true ]]; then
@@ -409,7 +420,9 @@ set -e
 if [[ "$audit_enabled" == true ]]; then
   log_config="log_dir=\"$audit_dir/tui\""
   set +e
-  "$codex_bin" -C "$agent_root" --sandbox "$sandbox_mode" --ask-for-approval "$approval_policy" -c "$log_config" "$prompt"
+  "$codex_bin" -C "$agent_root" --model "$codex_model" \
+    -c "model_reasoning_effort=\"$codex_reasoning_effort\"" \
+    --sandbox "$sandbox_mode" --ask-for-approval "$approval_policy" -c "$log_config" "$prompt"
   codex_status=$?
   set -e
   printf 'finished_utc=%s\ncodex_exit_status=%s\nstatus=finished\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$codex_status" >> "$audit_dir/run-info.txt"
@@ -417,7 +430,9 @@ if [[ "$audit_enabled" == true ]]; then
 fi
 
 set +e
-"$codex_bin" -C "$agent_root" --sandbox "$sandbox_mode" --ask-for-approval "$approval_policy" "$prompt"
+"$codex_bin" -C "$agent_root" --model "$codex_model" \
+  -c "model_reasoning_effort=\"$codex_reasoning_effort\"" \
+  --sandbox "$sandbox_mode" --ask-for-approval "$approval_policy" "$prompt"
 codex_status=$?
 set -e
 exit "$codex_status"
