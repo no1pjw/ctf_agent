@@ -31,6 +31,7 @@ usage() {
   CTF_MIN_HOST_FREE_MB 실행 전 필요한 Windows 호스트 최소 여유 공간(MiB, 기본 4096)
   CTF_CODEX_MODEL     문제 풀이 모델(기본 gpt-5.6-sol)
   CTF_CODEX_REASONING_EFFORT  추론 강도(기본 ultra)
+  CTF_CODEX_SERVICE_TIER  서비스 티어(기본 fast)
 EOF
 }
 
@@ -119,11 +120,20 @@ work_dir="$challenge_dir/work"
 evidence_dir="$challenge_dir/evidence"
 scope_dir="$challenge_dir/scope"
 tools_dir="$agent_root/references/tools"
+runtime_tool="$tools_dir/pwn-runtime-prepare.sh"
+runtime_output="$work_dir/runtime"
+runtime_manifest="$runtime_output/runtime.env"
 image_slug="$(printf '%s' "$challenge_name" | tr '[:upper:]_.' '[:lower:]--')"
 image_name="ctf-$image_slug:local"
 codex_bin=${CODEX_BIN:-}
 codex_model=${CTF_CODEX_MODEL:-gpt-5.6-sol}
 codex_reasoning_effort=${CTF_CODEX_REASONING_EFFORT:-ultra}
+codex_service_tier=${CTF_CODEX_SERVICE_TIER:-fast}
+
+if [[ ! "$codex_service_tier" =~ ^[A-Za-z0-9._-]+$ ]]; then
+  printf '잘못된 Codex 서비스 티어입니다: %s\n' "$codex_service_tier" >&2
+  exit 65
+fi
 
 if [[ -f "$source_dir/Dockerfile" || -f "$input_dir/Dockerfile" ]]; then
   runtime_mode=supplied-docker
@@ -137,6 +147,7 @@ else
 fi
 
 [[ -d "$agent_root" ]] || { printf 'CTF Agent 루트가 존재하지 않습니다: %s\n' "$agent_root" >&2; exit 66; }
+[[ -f "$runtime_tool" ]] || { printf 'pwn runtime 준비 도구가 없습니다: %s\n' "$runtime_tool" >&2; exit 66; }
 [[ -d "$source_dir" || -f "$source_zip" ]] || {
   printf '문제를 찾을 수 없습니다. 다음 중 하나가 필요합니다:\n  %s\n  %s\n' "$source_dir" "$source_zip" >&2
   exit 67
@@ -223,6 +234,8 @@ prompt=$(cat <<EOF
 - 설정: mode=$solve_mode, runtime=$runtime_mode
 - 기준: AGENTS.md, rules/ruleset.md, pwn-agent/skills/SKILL.md, pwn-agent/docs/playbook.md
 - 런타임: $compact_runtime
+- libc/ld 선행: work/runtime/runtime.env를 가장 먼저 읽어라. libc_path가 있으면 원격 심볼·오프셋 계산에 우선 사용하고, runtime_status=ready일 때만 canonical libc.so.6+ld.so를 pwn-run.sh --runtime-dir ... --binary ...로 함께 로컬 적용하라. host libc나 검증되지 않은 혼합 쌍은 금지하며 partial/incompatible은 STATIC-ONLY와 허가된 원격 첫 시도를 막지 않는다.
+- 가젯 탐색: 필요한 의미를 먼저 정한 뒤 references/tools/pwn-gadget-index.sh <binary> work/cache를 메인 ELF에 한 번만 실행하고 Build-ID 캐시를 재사용하라. pivot이 확인됐는데 필수 pop 가젯이 없으면 gadget-scarcity=confirmed로 확정하고 반복 검색 대신 PLT/GOT·간접 호출·leak/base·ret2dlresolve 설계로 즉시 전환하라. libc 가젯은 구체적인 libc base 확보 전략이 생긴 뒤에만 좁게 검색하라.
 - 범위: 호스트 바이너리 실행과 플래그 자동 제출 금지
 - 정리: Dockerfile 기반 문제의 컨테이너와 $image_name 이미지는 Codex 종료 후 런처가 자동 정리함
 - 결과: 한국어로 진행하며 work/solve.py와 간결한 work/writeup.md만 기본 생성
@@ -267,6 +280,7 @@ if [[ "$action" == dry-run ]]; then
   printf '문제 작업 경로:   %s\n' "$challenge_dir"
   printf 'Docker 이미지:    %s\n' "$image_name"
   printf '런타임 모드:      %s\n' "$runtime_mode"
+  printf 'libc/ld 준비:     제공 파일 우선, 부족하면 정확한 Docker 이미지에서 둘을 함께 추출\n'
   printf '풀이 모드:        %s\n' "$solve_mode"
   printf '재빌드:           %s\n' "$rebuild"
   if [[ "$runtime_mode" == supplied-docker && "$keep_docker" == false ]]; then
@@ -279,6 +293,7 @@ if [[ "$action" == dry-run ]]; then
   printf '승인 정책:        %s\n' "$approval_policy"
   printf 'Codex 모델:       %s\n' "$codex_model"
   printf '추론 강도:        %s\n' "$codex_reasoning_effort"
+  printf '서비스 티어:      %s (Fast mode 활성)\n' "$codex_service_tier"
   printf '완료 후 작업공간 정리: %s\n' "$([[ "$keep_workspace" == true ]] && printf '보존' || printf '자동')"
   if [[ -n "$remote_host" ]]; then
     printf '공식 원격 대상:   %s:%s\n' "$remote_host" "$remote_port"
@@ -324,6 +339,18 @@ else
   cp -a --update=none -- "$source_zip" "$input_dir"/
 fi
 printf '문제 준비 완료: %s\n' "$challenge_dir"
+
+set +e
+runtime_prepare_args=(--input "$input_dir" --output "$runtime_output")
+if [[ "$runtime_mode" == static-only ]]; then
+  runtime_prepare_args+=(--preserve-ready)
+fi
+"$runtime_tool" "${runtime_prepare_args[@]}"
+runtime_prepare_status=$?
+set -e
+if [[ $runtime_prepare_status -ne 0 ]]; then
+  printf '제공 파일만으로 완전한 libc/ld 쌍을 준비하지 못했습니다. 정확한 Docker 이미지가 준비되면 누락 파일을 보완합니다.\n'
+fi
 if [[ ! -f "$work_dir/state.json" && -x "$tools_dir/pwn-checkpoint.sh" ]]; then
   CTF_AGENT_ROOT="$agent_root" "$tools_dir/pwn-checkpoint.sh" "$challenge_name" setup active "mode=$solve_mode runtime=$runtime_mode" >/dev/null
 fi
@@ -346,6 +373,10 @@ if [[ "$audit_enabled" == true ]]; then
       printf 'target_network=denied\n'
     fi
     printf 'build_network=controlled-by-pwn-build\nruntime_network=none\nstatus=starting\n'
+    if [[ -f "$runtime_manifest" ]]; then
+      printf 'runtime_manifest=%s\n' "$runtime_manifest"
+      sed -n '/^runtime_status=/p;/^runtime_source=/p;/^pair_status=/p' "$runtime_manifest"
+    fi
   } > "$audit_dir/run-info.txt"
   find "$agent_root/.agents" "$agent_root/pwn-agent" "$agent_root/rules" "$agent_root/shimes" -type f -print | sort > "$audit_dir/available-role-files.txt"
   if "$codex_bin" -C "$agent_root" debug prompt-input "$prompt" > "$audit_dir/prompt-input.json" 2> "$audit_dir/prompt-input.stderr.log"; then
@@ -354,11 +385,6 @@ if [[ "$audit_enabled" == true ]]; then
     echo 'prompt_input_capture=failed' >> "$audit_dir/run-info.txt"
   fi
   printf '감사 로그 디렉터리: %s\n' "$audit_dir"
-fi
-
-if [[ "$action" == prepare-only ]]; then
-  [[ "$audit_enabled" == false ]] || printf 'status=prepared-only\n' >> "$audit_dir/run-info.txt"
-  exit 0
 fi
 
 cleanup_enabled=false
@@ -401,7 +427,70 @@ if [[ -f "$input_dir/Dockerfile" ]]; then
     build_status=$?
   fi
   set -e
-  [[ $build_status -eq 0 ]] || printf 'Docker 빌드를 사용할 수 없습니다. 정적 분석만 계속하고 정확한 방해 요소를 보고합니다.\n' >&2
+[[ $build_status -eq 0 ]] || printf 'Docker 빌드를 사용할 수 없습니다. 정적 분석만 계속하고 정확한 방해 요소를 보고합니다.\n' >&2
+fi
+
+runtime_scalar() {
+  local key=$1
+  [[ -f "$runtime_manifest" ]] || return 0
+  awk -F= -v wanted="$key" '$1 == wanted {sub(/^[^=]*=/, ""); print; exit}' "$runtime_manifest" 2>/dev/null || true
+}
+
+runtime_status=$(runtime_scalar runtime_status)
+if [[ "$runtime_status" != ready && $build_status -eq 0 ]] && docker image inspect "$image_name" >/dev/null 2>&1; then
+  set +e
+  if [[ "$audit_enabled" == true ]]; then
+    "$runtime_tool" --input "$input_dir" --output "$runtime_output" --image "$image_name" 2>&1 | tee "$audit_dir/runtime-prepare.log"
+    runtime_prepare_status=${PIPESTATUS[0]}
+  else
+    "$runtime_tool" --input "$input_dir" --output "$runtime_output" --image "$image_name"
+    runtime_prepare_status=$?
+  fi
+  set -e
+  [[ $runtime_prepare_status -eq 0 ]] || printf '정확한 libc/ld 자동 쌍을 완성하지 못했습니다. manifest의 출처·불일치를 유지하고 임의의 host 런타임은 사용하지 않습니다.\n' >&2
+fi
+
+runtime_status=$(runtime_scalar runtime_status)
+runtime_source=$(runtime_scalar runtime_source)
+printf 'libc/ld runtime: status=%s source=%s manifest=%s\n' "${runtime_status:-unavailable}" "${runtime_source:-none}" "$runtime_manifest"
+export CTF_PWN_RUNTIME_DIR="$runtime_output"
+export CTF_PWN_RUNTIME_MANIFEST="$runtime_manifest"
+export CTF_PWN_RUNTIME_STATUS="${runtime_status:-unavailable}"
+export CTF_PWN_IMAGE="$image_name"
+export CTF_PWN_RUNNER="$tools_dir/pwn-run.sh"
+manifest_value() {
+  local key=$1
+  [[ -f "$runtime_manifest" ]] || return 0
+  bash -c 'set -eu; source "$1"; printf "%s" "${!2-}"' bash "$runtime_manifest" "$key"
+}
+runtime_libc_path=$(manifest_value libc_path)
+runtime_ld_path=$(manifest_value ld_path)
+runtime_target_path=$(manifest_value target_path)
+if [[ -n "$runtime_libc_path" && -f "$runtime_libc_path" ]]; then
+  export CTF_PWN_LIBC_PATH="$runtime_libc_path"
+else
+  unset CTF_PWN_LIBC_PATH 2>/dev/null || true
+fi
+if [[ "$runtime_status" == ready && -n "$runtime_ld_path" && -f "$runtime_ld_path" ]]; then
+  export CTF_PWN_LD_PATH="$runtime_ld_path"
+else
+  unset CTF_PWN_LD_PATH 2>/dev/null || true
+fi
+if [[ -n "$runtime_target_path" && -f "$runtime_target_path" ]]; then
+  export CTF_PWN_BINARY_PATH="$runtime_target_path"
+else
+  unset CTF_PWN_BINARY_PATH 2>/dev/null || true
+fi
+if [[ "$audit_enabled" == true ]]; then
+  {
+    printf 'runtime_final_status=%s\n' "${runtime_status:-unavailable}"
+    printf 'runtime_final_source=%s\n' "${runtime_source:-none}"
+  } >> "$audit_dir/run-info.txt"
+fi
+
+if [[ "$action" == prepare-only ]]; then
+  [[ "$audit_enabled" == false ]] || printf 'status=prepared-only\n' >> "$audit_dir/run-info.txt"
+  exit 0
 fi
 
 set +e
@@ -429,6 +518,7 @@ if [[ "$audit_enabled" == true ]]; then
   set +e
   "$codex_bin" -C "$agent_root" --model "$codex_model" \
     -c "model_reasoning_effort=\"$codex_reasoning_effort\"" \
+    -c "service_tier=\"$codex_service_tier\"" --enable fast_mode \
     --sandbox "$sandbox_mode" --ask-for-approval "$approval_policy" -c "$log_config" "$prompt"
   codex_status=$?
   set -e
@@ -439,6 +529,7 @@ fi
 set +e
 "$codex_bin" -C "$agent_root" --model "$codex_model" \
   -c "model_reasoning_effort=\"$codex_reasoning_effort\"" \
+  -c "service_tier=\"$codex_service_tier\"" --enable fast_mode \
   --sandbox "$sandbox_mode" --ask-for-approval "$approval_policy" "$prompt"
 codex_status=$?
 set -e

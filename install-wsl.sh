@@ -26,6 +26,8 @@ chmod +x \
   "$target_dir/install-wsl.sh" \
   "$target_dir/references/tools/ctf-pwn-start.sh" \
   "$target_dir/references/tools/ctf-rev-start.sh" \
+  "$target_dir/references/tools/ctf-bench.sh" \
+  "$target_dir/references/tools/ctf-bench-metrics.py" \
   "$target_dir/references/tools/ctf-learn.sh" \
   "$target_dir/references/tools/ctf-clean.sh" \
   "$target_dir/references/tools/ctf-export.sh" \
@@ -33,6 +35,7 @@ chmod +x \
   "$target_dir/references/tools/pwn-build.sh" \
   "$target_dir/references/tools/pwn-cleanup.sh" \
   "$target_dir/references/tools/pwn-checkpoint.sh" \
+  "$target_dir/references/tools/pwn-runtime-prepare.sh" \
   "$target_dir/references/tools/pwn-run.sh" \
   "$target_dir/references/tools/pwn-remote-run.sh" \
   "$target_dir/references/tools/pwn-triage.sh" \
@@ -42,6 +45,7 @@ chmod +x \
 mkdir -p "$HOME/.local/bin"
 ln -sfn "$target_dir/references/tools/ctf-pwn-start.sh" "$HOME/.local/bin/ctf-pwn"
 ln -sfn "$target_dir/references/tools/ctf-rev-start.sh" "$HOME/.local/bin/ctf-rev"
+ln -sfn "$target_dir/references/tools/ctf-bench.sh" "$HOME/.local/bin/ctf-bench"
 ln -sfn "$target_dir/references/tools/ctf-learn.sh" "$HOME/.local/bin/ctf-learn"
 ln -sfn "$target_dir/references/tools/ctf-clean.sh" "$HOME/.local/bin/ctf-clean"
 ln -sfn "$target_dir/references/tools/ctf-export.sh" "$HOME/.local/bin/ctf-export"
@@ -63,6 +67,7 @@ done
 printf 'Installed CTF agent: %s\n' "$target_dir"
 printf 'Pwn launcher:        %s\n' "$HOME/.local/bin/ctf-pwn"
 printf 'Rev launcher:        %s\n' "$HOME/.local/bin/ctf-rev"
+printf 'Benchmark command:   %s\n' "$HOME/.local/bin/ctf-bench"
 printf 'Learning command:    %s\n' "$HOME/.local/bin/ctf-learn"
 printf 'Cleanup command:     %s\n' "$HOME/.local/bin/ctf-clean"
 printf 'Export command:      %s\n' "$HOME/.local/bin/ctf-export"

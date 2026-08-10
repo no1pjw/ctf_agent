@@ -1,18 +1,40 @@
 # Playbook
 
+## Runtime bundle first
+
+Before the Fast Probe, read `work/runtime/runtime.env`. The launcher prepares it in this order: a complete supplied libc/loader pair; a supplied component completed only after it matches the exact challenge image counterpart; or a libc/loader pair extracted together from that image. It never downloads a generic runtime, patches an input binary, or silently substitutes the host libc.
+
+Use `libc_path` for remote libc symbols and offsets whenever it is present. For local reproduction, require `runtime_status=ready` and invoke `pwn-run.sh --runtime-dir work/runtime --binary <target> <image>` so `ld.so --library-path /ctf-runtime` and `libc.so.6` are applied together inside the sandbox. Do not run the target directly with `LD_PRELOAD` or patch its interpreter. If the bundle is `partial`, `ambiguous`, or `incompatible`, keep its provenance for diagnosis but do not call it an exact local runtime; continue STATIC-ONLY and the bounded official remote path when otherwise ready.
+
 ## Fast Probe
 
 1. Run `pwn-triage.sh` once to collect file type, mitigations, symbols, imports, and `main` disassembly.
 2. Prefer supplied source and the exact Dockerfile environment. Reuse `ctf-<challenge>:local`; rebuild only when requested or absent.
-3. Reproduce with `pwn-run.sh`, which fixes interactive stdin, runtime network isolation, limits, and timeouts.
+3. Reproduce with `pwn-run.sh`, using its prepared runtime-bundle mode when `runtime_status=ready`; it fixes interactive stdin, explicit loader/libc selection, runtime network isolation, limits, and timeouts.
 4. Build one primitive at a time and attempt at most two candidate exploits before Deep escalation.
 5. Avoid GDB until two cheaper tests fail or the exact offset/state remains genuinely ambiguous.
+
+## Bounded gadget discovery
+
+Do not use gadget enumeration as an open-ended exploration loop.
+
+1. Write down the exact semantics required by the current chain before searching: pivot, argument setup, indirect dispatch, syscall, or stack adjustment.
+2. Run `../../references/tools/pwn-gadget-index.sh <main-elf> work/cache` once. Its 60-second cap and Build-ID cache are the gadget budget for the main ELF. A cache hit replaces a new search.
+3. If `leave ; ret` plus `pop rbp ; ret` establishes a stack pivot, mark the pivot primitive passed. Do not keep searching for alternate pivots without evidence that this one is unusable.
+4. If the same index lacks required classic register-pop gadgets, record `gadget-scarcity=confirmed` and stop broad searches of the main ELF. Move immediately to existing PLT/GOT calls, function-internal or indirect dispatch sequences, leak/base calculation, ret2dlresolve feasibility, or another narrowly justified strategy.
+5. Permit at most one additional targeted disassembly/opcode query, only for a named semantic that the compact index cannot express. Do not install or rotate through additional gadget tools merely to repeat the same enumeration.
+6. Do not enumerate the supplied libc until the exploit has a concrete libc leak/base strategy. Once it does, search only the required libc semantics, cache the selected offsets, and never substitute offsets from the Docker image libc when the runtime manifest says the supplied and image pairs differ.
+7. Store only the compact Build-ID index and selected offsets. Full gadget dumps are disposable caches and are not learning records.
+
+CET metadata is a one-time runtime question, not a reason to repeat gadget discovery. Record whether IBT/SHSTK is actually enforced in the exact sandbox when that changes exploit viability; otherwise continue from the established primitive.
 
 For a multi-stage exploit, create a bounded checkpoint after each primitive: `triage`, `primitive`, `leak`, `arbitrary-read-write`, `control-flow`, `local-flag`, and `remote`. Record only the invariant that passed or failed and the next cheapest discriminator. Keep the latest 20 transitions in `work/state.json`; do not create per-command notes. A resumed run starts by reading this state and matching feedback topics, then retests only the failed stage and its direct prerequisite.
 
 When an official remote endpoint is recorded, switch to Fast-to-Remote as soon as the solver is ready. If an exact local runtime exists, one local exploit-derived flag is enough. If no local runtime exists, statically cross-check the primitive, offsets, addresses, and I/O framing, syntax-check the parameterized solver, and make the first bounded remote attempt without waiting for a Dockerfile, cached image, or local flag. Run it before a negative control, P5, detailed evidence work, or write-up. A verified remote flag is the contest completion signal; perform only minimal private evidence saving and cleanup afterward. If the first remote attempt fails, return to the cheapest environment/protocol discriminator and permit one corrected retry.
 
 Before the first remote attempt, retain one capped local-success transcript and exact runtime provenance when a local runtime exists. In `STATIC-ONLY`, retain the compact static cross-check instead. On remote failure, checkpoint the last prompt or invariant reached, keep diagnostic output enabled in the private transcript, and compare only framing, runtime offsets, and the failed invariant. Do not restart static analysis or rewrite an already passed primitive.
+
+When local succeeds but remote fails, inspect `runtime.env` before changing the exploit primitive: confirm which libc supplied the symbol offsets, whether the local loader/libc pair was exact, and whether the leak-to-base calculation assumed the same ABI. The loader reproduces local process startup; it is never sent to or executed on the remote service.
 
 For a supplied Dockerfile, treat containers and the generated `ctf-<challenge>:local` image as run-scoped resources. The launcher invokes `pwn-cleanup.sh` after Codex exits, including failures and interruptions. Do not call broad prune commands or remove base images. Use `--keep-docker` only when the user explicitly needs post-run debugging.
 

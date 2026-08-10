@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import select
 import sys
 import time
 import unicodedata
@@ -106,9 +107,25 @@ def command_capture(args: argparse.Namespace) -> int:
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     first_flag_seen = False
+    remote_flag_seen = False
+    usage_deadline: float | None = None
 
     with output.open("w", encoding="utf-8", newline="\n") as handle:
-        for raw in sys.stdin:
+        while True:
+            wait_seconds: float | None = None
+            if usage_deadline is not None:
+                wait_seconds = max(0.0, usage_deadline - time.monotonic())
+                if wait_seconds == 0.0:
+                    return REMOTE_FLAG_EXIT
+
+            readable, _, _ = select.select([sys.stdin], [], [], wait_seconds)
+            if not readable:
+                return REMOTE_FLAG_EXIT if remote_flag_seen else 0
+
+            raw = sys.stdin.readline()
+            if raw == "":
+                return REMOTE_FLAG_EXIT if remote_flag_seen else 0
+
             elapsed = round(time.monotonic() - started, 3)
             try:
                 event = json.loads(raw)
@@ -141,13 +158,24 @@ def command_capture(args: argparse.Namespace) -> int:
                 if text:
                     print(f"[{args.label} +{elapsed:.1f}s] {text[:180]}", flush=True)
             if remote_flag:
+                remote_flag_seen = True
                 if not args.quiet:
                     print(
                         f"[{args.label} +{elapsed:.1f}s] 원격 플래그 포착, 즉시 종료",
                         flush=True,
                     )
-                return REMOTE_FLAG_EXIT
-    return 0
+                if args.usage_grace <= 0:
+                    return REMOTE_FLAG_EXIT
+                usage_deadline = time.monotonic() + args.usage_grace
+                continue
+
+            if remote_flag_seen:
+                if event_type == "turn.completed":
+                    return REMOTE_FLAG_EXIT
+                if event_type == "item.started" and item.get("type") in TOOL_ITEM_TYPES:
+                    # Token telemetry must never permit post-flag verification or
+                    # another remote attempt. End immediately if a new tool starts.
+                    return REMOTE_FLAG_EXIT
 
 
 def command_summarize(args: argparse.Namespace) -> int:
@@ -163,6 +191,7 @@ def command_summarize(args: argparse.Namespace) -> int:
     first_flag: str | None = None
     remote_flag_seconds: float | None = None
     remote_flag: str | None = None
+    usage_events = 0
 
     for event in events:
         if remote_flag is None and isinstance(event.get("_benchmark_remote_flag"), str):
@@ -172,6 +201,7 @@ def command_summarize(args: argparse.Namespace) -> int:
                 remote_flag_seconds = float(elapsed)
 
         if event.get("type") == "turn.completed" and isinstance(event.get("usage"), dict):
+            usage_events += 1
             usage = event["usage"]
             input_tokens += int(usage.get("input_tokens", 0) or 0)
             cached_input_tokens += int(usage.get("cached_input_tokens", 0) or 0)
@@ -241,7 +271,9 @@ def command_summarize(args: argparse.Namespace) -> int:
         "cached_input_tokens": cached_input_tokens,
         "output_tokens": output_tokens,
         "reasoning_output_tokens": reasoning_output_tokens,
-        "total_tokens": input_tokens + output_tokens,
+        "total_tokens": input_tokens + output_tokens if usage_events else None,
+        "token_usage_available": usage_events > 0,
+        "token_usage_events": usage_events,
         "tool_calls": tool_calls,
         "subagent_events": subagent_events,
         "events_file": str(Path(args.events)),
@@ -273,6 +305,15 @@ def display_success(summary: dict[str, Any]) -> str:
 
 def seconds(value: Any) -> str:
     return "-" if value is None else f"{float(value):.1f}초"
+
+
+def display_tokens(summary: dict[str, Any]) -> str:
+    usage_available = summary.get("token_usage_available")
+    if usage_available is None:
+        usage_available = isinstance(summary.get("total_tokens"), int)
+    if not usage_available:
+        return "미집계 (즉시 종료)"
+    return f"{int(summary.get('total_tokens', 0)):,}"
 
 
 def display_width(value: Any) -> int:
@@ -326,7 +367,7 @@ def command_report(args: argparse.Namespace) -> int:
         ("성공", display_success(plain), display_success(fast)),
         ("풀이 시간", seconds(plain_solve_time), seconds(fast_solve_time)),
         (flag_time_label, seconds(plain_flag_time), seconds(fast_flag_time)),
-        ("총 토큰", f"{plain['total_tokens']:,}", f"{fast['total_tokens']:,}"),
+        ("총 토큰", display_tokens(plain), display_tokens(fast)),
         ("도구 호출", f"{plain['tool_calls']}회", f"{fast['tool_calls']}회"),
         ("서브에이전트 이벤트", f"{plain['subagent_events']}회", f"{fast['subagent_events']}회"),
     ]
@@ -355,11 +396,13 @@ def command_report(args: argparse.Namespace) -> int:
             "- Reasoning effort: `xhigh`",
             "- Multi-agent: disabled",
             "- Automatic skill search: disabled",
+            "- User-installed skills: isolated with a temporary CODEX_HOME",
             "- Sessions: ephemeral",
             "- Execution: plain Codex and FAST_LOCAL in parallel",
             f"- Success mode: {'bounded remote harness flag short-circuit' if remote_mode else 'local clean replay'}",
             "",
-            "`총 토큰`은 Codex JSONL의 `input_tokens + output_tokens` 합계입니다.",
+            "`총 토큰`은 Codex JSONL의 `turn.completed.usage`에서 받은 `input_tokens + output_tokens` 합계입니다.",
+            "플래그 즉시 종료 모드에서 usage 이벤트가 오기 전에 종료되면 0으로 오표시하지 않고 `미집계`로 표시합니다. `ctf-bench --exact-tokens`는 성공 시각을 그대로 유지한 채 최종 usage 이벤트만 제한 시간 동안 기다립니다.",
             (
                 "원격 모드에서는 공용 원격 하니스의 플래그 획득 증거를 포착하는 즉시 성공으로 인정하고 후속 검증을 생략합니다."
                 if remote_mode
@@ -392,6 +435,7 @@ def parser() -> argparse.ArgumentParser:
     capture.add_argument("--output", required=True)
     capture.add_argument("--quiet", action="store_true")
     capture.add_argument("--stop-on-flag", action="store_true")
+    capture.add_argument("--usage-grace", type=float, default=0.0)
     capture.set_defaults(function=command_capture)
 
     summarize = subcommands.add_parser("summarize")
