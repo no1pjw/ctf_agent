@@ -60,6 +60,16 @@ If no Dockerfile and no matching cached image exist:
 3. Do not escalate merely because the Dockerfile is absent. Escalate only for ordinary technical triggers found during analysis.
 4. If an exact official endpoint is recorded and static analysis is sufficient to complete a parameterized solver, use the bounded remote harness immediately; the missing local runtime is not a blocker. Otherwise, when a decisive dynamic test is unavoidable, finish the static map first and report the exact required architecture, loader, libc, service command, or other missing runtime component.
 
+## Complex target fast discipline
+
+Use these rules for any large, layered, VM-like, archive-delivered, or transport-heavy challenge; they are not a separate category or pipeline.
+
+1. Make the first probe identify the real Docker/runner/service entrypoint and the smallest relevant configuration/source slice. Prefer archive listing and single-file streaming over full extraction.
+2. Classify invocation, upload, transport, and framing mistakes as environment failures. Fix the concrete wrapper once and continue the current exploit hypothesis; do not restart triage or count them as exploit trials.
+3. Give a challenge-name-derived hypothesis at most one cheap discriminator. Rank source, version, configuration, and exposed-interface evidence above naming clues.
+4. Start with the smallest payload that proves the current primitive. When payload size or one transfer timeout is the blocker, switch immediately to a minimal freestanding payload instead of retrying a large generic/static runtime build.
+5. After a strong read/write or control primitive is established, choose a deterministic object/identity anchor and shortest direct final effect. Check permissions, copy-on-write, and alignment once before abandoning that path. Maintain only one current strategy and one evidence-backed fallback.
+
 ## Malformed variadic input
 
 When a scanf/printf-family format has more conversions than supplied pointers/arguments:

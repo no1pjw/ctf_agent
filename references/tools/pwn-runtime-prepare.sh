@@ -72,6 +72,26 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 trap 'exit 129' HUP
 
+write_env() {
+  printf '%s=%q\n' "$1" "$2"
+}
+
+publish_stage() {
+  local old_dir=
+  if [[ -e "$output_real" || -L "$output_real" ]]; then
+    old_dir="$output_parent_real/.pwn-runtime-old.$$"
+    [[ ! -e "$old_dir" ]] || { echo "temporary runtime backup already exists: $old_dir" >&2; return 73; }
+    mv -- "$output_real" "$old_dir"
+  fi
+  if mv -- "$stage" "$output_real"; then
+    stage=
+    [[ -z "$old_dir" ]] || rm -rf -- "$old_dir"
+  else
+    [[ -z "$old_dir" ]] || mv -- "$old_dir" "$output_real"
+    return 74
+  fi
+}
+
 elf_field() {
   local path=$1 label=$2
   LC_ALL=C readelf -h -- "$path" 2>/dev/null |
@@ -140,6 +160,40 @@ if [[ -n "$target_path" ]]; then
   target_data=$(elf_field "$target_path" 'Data')
   target_interpreter=$(elf_interpreter "$target_path")
   target_dir=$(dirname -- "$target_path")
+fi
+
+# A container's own libc/loader is meaningful only when it can be matched to
+# a supplied dynamic target ELF. Without that target, extracting the build
+# environment's runtime creates a misleading "ready" bundle.
+if [[ -z "$target_path" ]]; then
+  {
+    write_env runtime_status not-applicable
+    write_env runtime_source no-dynamic-target
+    write_env pair_status not-applicable
+    write_env reason 'no supplied dynamic userland target ELF; container libc/loader was not treated as the challenge runtime'
+    write_env target_path ''
+    write_env target_class ''
+    write_env target_machine ''
+    write_env target_data ''
+    write_env target_interpreter ''
+    write_env target_build_id ''
+    write_env libc_path ''
+    write_env ld_path ''
+    write_env local_libc_path ''
+    write_env local_ld_path ''
+    write_env libc_origin ''
+    write_env ld_origin ''
+    write_env libc_build_id ''
+    write_env ld_build_id ''
+    write_env image_ref "$image"
+    write_env image_id ''
+  } > "$stage/runtime.env"
+  chmod 755 "$stage"
+  publish_stage
+  printf 'runtime_status=not-applicable\n'
+  printf 'runtime_source=no-dynamic-target\n'
+  printf 'runtime_pair=not-applicable\n'
+  exit 0
 fi
 
 SELECTED=
@@ -441,10 +495,6 @@ fi
 [[ ! -f "$stage/image/libc.so.6" ]] || chmod 644 "$stage/image/libc.so.6"
 find "$stage" -type d -exec chmod 755 {} +
 
-write_env() {
-  printf '%s=%q\n' "$1" "$2"
-}
-
 target_build_id=$([[ -n "$target_path" ]] && elf_build_id "$target_path" || true)
 
 {
@@ -487,19 +537,7 @@ if [[ "$preserve_ready" == true && "$status" == unavailable &&
   fi
 fi
 
-old_dir=
-if [[ -e "$output_real" || -L "$output_real" ]]; then
-  old_dir="$output_parent_real/.pwn-runtime-old.$$"
-  [[ ! -e "$old_dir" ]] || { echo "temporary runtime backup already exists: $old_dir" >&2; exit 73; }
-  mv -- "$output_real" "$old_dir"
-fi
-if mv -- "$stage" "$output_real"; then
-  stage=
-  [[ -z "$old_dir" ]] || rm -rf -- "$old_dir"
-else
-  [[ -z "$old_dir" ]] || mv -- "$old_dir" "$output_real"
-  exit 74
-fi
+publish_stage
 
 printf 'runtime_status=%s\n' "$status"
 printf 'runtime_source=%s\n' "$runtime_source"

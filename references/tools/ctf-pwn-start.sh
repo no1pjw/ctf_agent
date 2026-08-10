@@ -200,10 +200,10 @@ prompt=$(cat <<EOF
 허가된 pwn 문제 '$challenge_name'을 즉시 풀어라.
 - 입력: challenges/$challenge_name/input
 - 실행: mode=$solve_mode, runtime=$runtime_mode, 파일 변경·경과 시간 감시 경고와 자동 종료는 모두 비활성이다.
-- 정책: AGENTS.md와 \$ctf-pwn 스킬을 따르되 반복 설명하지 말고 state.json, runtime.env, intake-exec.txt, feedback index를 확인한 뒤 가장 싼 분석 명령부터 실행하라.
+- 시작: \$ctf-pwn 스킬과 runtime.env, intake-exec.txt, 비어 있지 않은 state.json만 읽고 바로 가장 싼 결합 분석을 실행하라. HARD_RULES, role, playbook, ruleset, 전체 feedback index는 시작할 때 읽지 마라.
 - 런타임: $compact_runtime runtime.env의 libc/ld 출처를 지키고 host 런타임이나 미검증 혼합 쌍을 사용하지 마라.
 - 제한: 한국어로 진행하고 웹 검색·호스트 바이너리 실행·플래그 자동 제출을 금지한다.
-- 최우선 결과: 플래그 검증 전에는 work/solve.py와 꼭 필요한 비공개 진단만 만들고 work/writeup.md는 읽거나 만들거나 수정하지 마라. 준비된 exploit은 문서 작업보다 먼저 즉시 실행하라.
+- 최우선 결과: 짧은 결합 probe -> work/solve.py -> 실행 순서로 진행하라. 환경·전송 실패는 exploit 실패와 분리하고 같은 분석을 처음부터 반복하지 마라. 플래그 전에는 writeup을 건드리지 마라.
 - 성공 이후: 실제 검증된 플래그와 획득 시간을 먼저 즉시 출력한 다음 work/.solved에 verified를 기록하고, 세션이 계속될 때만 간결한 work/writeup.md를 작성하라.
 EOF
 )

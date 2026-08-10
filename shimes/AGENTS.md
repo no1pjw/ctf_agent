@@ -12,7 +12,9 @@ Operate only on CTF challenges, local labs, and systems for which the user has e
 
 ## Startup
 
-1. Read `rules/ruleset.md`, `state/notes.md`, and `state/todo.md`.
+When a launcher already selected a category, its specialist skill is the single execution contract: do not preload `ruleset.md`, role/playbook documents, global notes, or unrelated feedback. Read a longer reference only after a concrete blocker identifies it.
+
+1. For an unclassified manual session, read `rules/ruleset.md`, `state/notes.md`, and `state/todo.md`.
 2. Create or select `challenges/<challenge-id>/` and record source, category, scope, flag format, artifacts, and network allowance.
 3. Never execute an untrusted artifact outside `sandbox/`. Prefer offline inspection first.
 4. Route work through the phase owners below. A phase may be repeated when evidence changes.
@@ -28,10 +30,7 @@ Adaptive mode is the default for every category: P0-Lite, fixed routing when the
 - In Fast mode, keep state in the active session and create the solver first. Before a validated flag is printed, do not create, update, or read a write-up; retain only the smallest required checkpoint or private transcript. A concise write-up is post-flag work and is skipped when success short-circuits the session.
 - Escalate without restarting when source is absent, the target is stripped/obfuscated, heap/race/probabilistic behavior appears, environment/protocol remains uncertain, local and official behavior differ, two exploit trials fail, or the fast budget expires.
 - Reuse Fast results in Deep mode; never repeat completed discovery only to satisfy phase formatting.
-- For pwn with a recorded official endpoint, run every newly local-successful solver version remotely at once to minimize local/remote drift. When exact local execution is unavailable, run the statically cross-checked first version and each materially corrected version. Do not impose a global attempt count or replay an unchanged solver automatically. A missing Dockerfile, cached image, or local flag must not block the first run. Run it before repeated controls, P5, or write-up, and print a remote flag and its measured acquisition time as soon as received.
-- A retained exact image libc/loader pair may be used for one local-structure-only run before scarce remote attempts when a pwn chain is multi-stage, alignment-sensitive, or probabilistic. Keep image and supplied-libc calculations separate, instrument each remote stage, and never claim that this structural run validates remote offsets.
-- Pwn solving must remain offline and independent: disable browser/web/search tools and never retrieve GitHub solutions, blogs, or challenge write-ups. Use only supplied artifacts, local tools, durable feedback, the controlled Docker build harness, and the exact recorded endpoint for bounded exploit execution.
-- Absence of a Dockerfile is not a blocker or an escalation trigger by itself. If no matching cached image exists, declare `STATIC-ONLY`, continue with source/static analysis, avoid Docker retries or host execution, and request an exact runtime only when a decisive dynamic test is genuinely required.
+- For pwn, route all runtime, offline solving, fast-to-remote, and completion details to `pwn-agent/skills/SKILL.md`; do not restate or expand them during startup.
 - For Web challenges, inspect and start a supplied Compose file before a standalone Dockerfile. Run a disposable source copy, rebind published ports to loopback, make runtime networks internal, reject unsafe host/device/privileged access, and record the origin in `work/web-runtime.env` before HTTP traffic.
 
 ## Shared execution environment

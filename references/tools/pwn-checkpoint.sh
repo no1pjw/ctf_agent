@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [[ ${CTF_PWN_BENCHMARK:-false} == true ]]; then
+  echo 'checkpoint=skipped-benchmark'
+  exit 0
+fi
+
 if [[ $# -lt 3 || $# -gt 4 ]]; then
   echo 'usage: pwn-checkpoint.sh CHALLENGE STAGE STATUS [SUMMARY]' >&2
   exit 64

@@ -273,6 +273,19 @@ cleanup_benchmark_codex_homes() {
   rmdir -- "$benchmark_codex_home_parent" 2>/dev/null || true
 }
 
+trim_wsl_free_blocks() {
+  [[ "$category" == pwn ]] || return 0
+  [[ ${CTF_BENCH_AUTO_TRIM:-true} == true ]] || return 0
+  [[ -x /usr/sbin/fstrim ]] || return 0
+  command -v sudo >/dev/null 2>&1 || return 0
+
+  if sudo -n /usr/sbin/fstrim -av >/dev/null 2>&1; then
+    printf 'WSL 빈 블록 반환: 완료\n'
+  else
+    printf 'WSL 빈 블록 반환: 건너뜀 (fstrim 권한 또는 파일시스템 상태 확인 필요)\n' >&2
+  fi
+}
+
 docker_tracking=false
 declare -A docker_container_baseline=()
 declare -A docker_image_baseline=()
@@ -341,6 +354,7 @@ cleanup_benchmark_run() {
   trap - EXIT
   cleanup_benchmark_docker_resources || true
   cleanup_benchmark_codex_homes || true
+  trim_wsl_free_blocks || true
   exit "$status"
 }
 
@@ -415,10 +429,11 @@ if [[ "$category" == pwn ]]; then
     command -v docker >/dev/null 2>&1 || { echo 'Dockerfile이 있는 pwn 벤치에는 Docker CLI가 필요합니다.' >&2; exit 69; }
     prepare_shared_image "$fast_input" "$run_root/metrics/shared-image.log" || true
   fi
-  # Plain receives only the supplied files. Runtime normalization, intake and
-  # checkpoint scaffolding are part of the ctf-pwn Agent side only.
-  prepare_pwn_runtime "$fast_input" "$fast_work" "$shared_image" "$shared_image_ready" "$run_root/metrics/fast_local.runtime.log"
+  # Plain receives only the supplied files. Runtime normalization and intake
+  # are part of the ctf-pwn Agent side only. Intake precedes runtime selection
+  # so a missing dynamic target cannot be confused with the container runtime.
   "$agent_root/references/tools/pwn-intake-check.sh" "$fast_input" > "$fast_work/intake-exec.txt" 2>/dev/null || true
+  prepare_pwn_runtime "$fast_input" "$fast_work" "$shared_image" "$shared_image_ready" "$run_root/metrics/fast_local.runtime.log"
   CTF_AGENT_ROOT="$fast_root" "$agent_root/references/tools/pwn-checkpoint.sh" \
     "$challenge_name" setup active 'mode=adaptive benchmark=ctf-pwn' >/dev/null 2>&1 || true
 else
@@ -620,9 +635,9 @@ EOF
 허가된 pwn CTF 문제 '$challenge_name'을 ctf-pwn과 동일한 구조로 즉시 풀어라.
 $authorization_context
 - 입력: challenges/$challenge_name/input
-- 시작: AGENTS.md, ctf-pwn 스킬, work/runtime/runtime.env, work/intake-exec.txt, work/state.json을 따른다.
+- 시작: ctf-pwn 스킬, runtime.env, intake-exec.txt, 비어 있지 않은 state.json만 읽고 바로 짧은 결합 probe를 실행한다. HARD_RULES, role, playbook, ruleset, 전체 feedback index는 선로딩하지 않는다.
 - 모드: adaptive, gpt-5.6-sol xhigh fast. 웹 검색과 write-up 조회, 서브에이전트, 호스트 바이너리 실행, scoreboard 제출은 금지한다.
-- 최우선 결과: challenges/$challenge_name/work/solve.py로 플래그를 얻어라. 플래그 전에는 writeup을 읽거나 만들거나 수정하지 말고, 벤치마크에서는 성공 후에도 writeup을 생략하라.
+- 최우선 결과: 환경·전송 실패와 exploit 실패를 분리하고, 같은 분석을 반복하지 말고 challenges/$challenge_name/work/solve.py를 가장 빨리 실행해 플래그를 얻어라. 벤치마크에서는 writeup과 사전 checkpoint를 생략하라.
 $docker_benchmark_rule
 $common_execution
 EOF
@@ -732,6 +747,7 @@ run_variant() {
       MALLOC_ARENA_MAX=2 NODE_OPTIONS="--max-old-space-size=$((memory_max_mb - 256))" \
       CTF_AGENT_ROOT="$workspace" CTF_BENCH_WORK_DIR="$work_dir" \
       CTF_BENCH_CATEGORY="$category" \
+      CTF_PWN_BENCHMARK="$([[ "$category" == pwn ]] && printf true || printf false)" \
       CTF_BENCH_DOCKER_IMAGE="$docker_image" CTF_BENCH_REMOTE="$remote_enabled" \
       CTF_BENCH_DOCKER_RUNNER="$common_docker_runner" \
       CTF_BENCH_RUN_ID="$run_id" CTF_BENCH_VARIANT="$key" \

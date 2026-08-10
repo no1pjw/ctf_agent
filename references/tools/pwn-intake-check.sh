@@ -17,15 +17,26 @@ printf 'intake_root=%s\n' "$input_dir"
 
 mapfile -d '' candidate_files < <(find "$input_dir" -maxdepth 4 -type f -print0 | sort -z)
 elf_names=()
+dynamic_elf_names=()
 for candidate in "${candidate_files[@]}"; do
   if file -b -- "$candidate" 2>/dev/null | grep -qE '^ELF .* executable'; then
     elf_names+=("$(basename -- "$candidate")")
+    if readelf -l -- "$candidate" 2>/dev/null | grep -q 'Requesting program interpreter'; then
+      dynamic_elf_names+=("$(basename -- "$candidate")")
+    fi
   fi
 done
 if (( ${#elf_names[@]} > 0 )); then
   printf 'input_elf_names=%s\n' "$(printf '%s\n' "${elf_names[@]}" | sort -u | paste -sd, -)"
 else
   printf 'input_elf_names=none\n'
+fi
+if (( ${#dynamic_elf_names[@]} > 0 )); then
+  printf 'dynamic_userland_targets=%s\n' "$(printf '%s\n' "${dynamic_elf_names[@]}" | sort -u | paste -sd, -)"
+  echo 'runtime_pair_applicability=target-matched'
+else
+  echo 'dynamic_userland_targets=none'
+  echo 'runtime_pair_applicability=not-applicable-until-target-identified'
 fi
 
 if [[ ! -f "$dockerfile" ]]; then
