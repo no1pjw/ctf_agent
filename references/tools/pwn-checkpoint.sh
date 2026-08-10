@@ -32,7 +32,7 @@ try:
 except (OSError, json.JSONDecodeError):
     state = {}
 
-summary = os.environ.get("SUMMARY", "").replace("\x00", "")[:600]
+summary = os.environ.get("SUMMARY", "").replace("\x00", "")[:1200]
 entry = {
     "time_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     "stage": os.environ["STAGE"],
@@ -65,5 +65,17 @@ finally:
     except FileNotFoundError:
         pass
 PY
+
+case "$stage:$status" in
+  primitive:passed|leak:passed|arbitrary-read-write:passed|control-flow:passed)
+    solver="$challenge_dir/work/solve.py"
+    template="$agent_root/references/tools/pwntools-template.py"
+    if [[ ! -e "$solver" && -f "$template" ]]; then
+      cp -- "$template" "$solver"
+      chmod 755 "$solver"
+      printf 'solver scaffold: %s\n' "$solver"
+    fi
+    ;;
+esac
 
 printf 'checkpoint: %s %s\n' "$stage" "$status"

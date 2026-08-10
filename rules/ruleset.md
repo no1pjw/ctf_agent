@@ -18,7 +18,11 @@ Classify networking before use:
 
 Never treat build dependency access as authorization for target traffic. Stop on unexpected redirects, third parties, or runtime egress.
 
-For pwn challenges, a host and port explicitly supplied to `ctf-pwn` or `ctf-bench` records one official TCP endpoint. If an exact local runtime exists, one local exploit-derived flag triggers the bounded remote harness. If it does not, a statically cross-checked and syntax-valid parameterized solver may make the first bounded remote attempt without a Dockerfile, cached image, or local flag. Do not delay for repeat controls or write-up. Allow a second attempt only after a material correction. This authorization does not include port scanning, neighboring hosts, scoreboard access, brute force, persistence, or lateral movement.
+For pwn challenges, a host and port explicitly supplied to `ctf-pwn` or `ctf-bench` records one official TCP endpoint. For `ctf-pwn`, every newly local-successful solver version triggers an immediate remote harness run so local/remote drift is discovered early. If exact local execution is unavailable, a statically cross-checked and syntax-valid first version and each materially corrected version may run remotely without a Dockerfile, cached image, or local flag. Do not impose a global count, delay for repeat controls, or replay an unchanged solver automatically. This authorization does not include port scanning, neighboring hosts, scoreboard access, brute force, flooding, persistence, or lateral movement. Benchmark-specific attempt policy remains isolated to `ctf-bench`.
+
+When an incompatible pwn manifest retains an exact image libc/loader pair, one sandboxed local-structure-only run is permitted before a scarce remote attempt for a multi-stage, alignment-sensitive, or probabilistic chain. It may validate framing, pivot, alignment, and stage order, but not supplied-libc remote offsets. Keep both profiles explicit and require secret-free stage diagnostics before spending the remote attempt.
+
+Pwn solving is offline-first and solution lookup is prohibited. Do not browse the web, use search engines or GitHub search, retrieve blogs/write-ups, or use shell/MCP/browser/computer tools to obtain challenge solutions. The only target-network exception is the exact recorded endpoint through the bounded exploit client. Controlled dependency access by the supplied Docker build harness is a separate build-network class and does not authorize research browsing.
 
 ## R-4 Evidence
 
@@ -28,9 +32,11 @@ Storage compaction must never delete category feedback, `work/solve.py`, `work/w
 
 Bound operational memory: `work/state.json` retains at most 20 compact stage transitions, remote transcripts default to 1 MiB, and full dumps belong only in a disposable sandbox. Existing category feedback is durable knowledge and is never pruned by workspace or cache cleanup.
 
+For pwn, launcher-displayed inactivity and wall-clock budgets are enforceable stop conditions, not advisory text. Preserve the latest structured checkpoint and solver scaffold before termination. Cleanup may target only Docker resources for the named challenge and processes that inherited the current run ID; never kill unrelated or pre-existing processes.
+
 ## R-5 Reproducibility
 
-For deterministic Fast solves without a remote endpoint, require two clean P4 successes and one negative control. When an official pwn endpoint is recorded, a ready solver triggers an immediate bounded remote attempt before those controls: after one local flag when a runtime exists, or after an independent static cross-check when it does not. A format-valid flag derived by that remote exploit is the contest completion signal. On remote failure, resume deeper verification and environment comparison. A crash, anomaly, or plausible plaintext is not by itself a verified result.
+For deterministic Fast solves without a remote endpoint, require two clean P4 successes and one negative control. When an official pwn endpoint is recorded, each new local success triggers an immediate remote run before those controls; without an exact local runtime, use an independent static cross-check for the first and each materially corrected solver. A format-valid flag derived by that remote exploit is the contest completion signal. On remote failure, compare the exact runtime profile and failed stage before the next corrected local/remote cycle. A crash, anomaly, or plausible plaintext is not by itself a verified result.
 
 ## R-6 Exploit limits
 

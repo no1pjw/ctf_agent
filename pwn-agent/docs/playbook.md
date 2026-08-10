@@ -6,6 +6,12 @@ Before the Fast Probe, read `work/runtime/runtime.env`. The launcher prepares it
 
 Use `libc_path` for remote libc symbols and offsets whenever it is present. For local reproduction, require `runtime_status=ready` and invoke `pwn-run.sh --runtime-dir work/runtime --binary <target> <image>` so `ld.so --library-path /ctf-runtime` and `libc.so.6` are applied together inside the sandbox. Do not run the target directly with `LD_PRELOAD` or patch its interpreter. If the bundle is `partial`, `ambiguous`, or `incompatible`, keep its provenance for diagnosis but do not call it an exact local runtime; continue STATIC-ONLY and the bounded official remote path when otherwise ready.
 
+An incompatible manifest may still contain `local_libc_path` and `local_ld_path` extracted together from the exact image. They are a valid local structural profile, not the remote profile. Only when the exploit is multi-stage, stack-alignment-sensitive, or probabilistic, make one end-to-end structural run with `pwn-run.sh --structural-runtime-dir work/runtime --binary <target> <image>`. Use the image libc for local address calculations and the supplied analysis libc for remote calculations. This run may validate the pivot, call alignment, I/O framing, and complete stage order, but must never be cited as proof of remote libc offsets. Do not require this extra run solely because the official attempt count is small.
+
+## Offline solving boundary
+
+Solve independently from challenge inputs, prepared runtime files, local analysis tools, and matching durable feedback. Browser tools, web/search APIs, search engines, GitHub search, blogs, and public or private challenge write-ups are forbidden. Do not fetch solution material through `curl`, `wget`, package APIs, MCP apps, or computer-use tools. The exact official CTF endpoint is not a research source: contact it only through the bounded exploit harness after the solver is ready. Controlled Docker build networking is separate and may be used only by the supplied build harness.
+
 ## Fast Probe
 
 1. Run `pwn-triage.sh` once to collect file type, mitigations, symbols, imports, and `main` disassembly.
@@ -13,6 +19,9 @@ Use `libc_path` for remote libc symbols and offsets whenever it is present. For 
 3. Reproduce with `pwn-run.sh`, using its prepared runtime-bundle mode when `runtime_status=ready`; it fixes interactive stdin, explicit loader/libc selection, runtime network isolation, limits, and timeouts.
 4. Build one primitive at a time and attempt at most two candidate exploits before Deep escalation.
 5. Avoid GDB until two cheaper tests fail or the exact offset/state remains genuinely ambiguous.
+6. Read `work/intake-exec.txt`. If Docker COPY destinations and service executable references differ, determine the actual entrypoint before treating a local success or failure as representative of the official service.
+
+The launcher neither emits inactivity/wall-clock heartbeat warnings nor terminates an active solve. Adaptive/Fast defaults to `high`; explicit Deep defaults to `ultra`. Externalize progress only when it helps the solve, and never treat missing file writes as proof that the solver is stuck.
 
 ## Bounded gadget discovery
 
@@ -28,15 +37,19 @@ Do not use gadget enumeration as an open-ended exploration loop.
 
 CET metadata is a one-time runtime question, not a reason to repeat gadget discovery. Record whether IBT/SHSTK is actually enforced in the exact sandbox when that changes exploit viability; otherwise continue from the established primitive.
 
-For a multi-stage exploit, create a bounded checkpoint after each primitive: `triage`, `primitive`, `leak`, `arbitrary-read-write`, `control-flow`, `local-flag`, and `remote`. Record only the invariant that passed or failed and the next cheapest discriminator. Keep the latest 20 transitions in `work/state.json`; do not create per-command notes. A resumed run starts by reading this state and matching feedback topics, then retests only the failed stage and its direct prerequisite.
+For a multi-stage exploit, create a bounded checkpoint after each primitive: `triage`, `primitive`, `leak`, `arbitrary-read-write`, `control-flow`, `local-flag`, and `remote`. Record `invariant`, selected `strategy`, unresolved `constraints`, and the cheapest `next` discriminator. A passed primitive checkpoint creates the solver scaffold automatically; fill it immediately. Keep the latest 20 transitions in `work/state.json`; do not create per-command notes. A resumed run starts by reading this state and matching feedback topics, then retests only the failed stage and its direct prerequisite.
 
-When an official remote endpoint is recorded, switch to Fast-to-Remote as soon as the solver is ready. If an exact local runtime exists, one local exploit-derived flag is enough. If no local runtime exists, statically cross-check the primitive, offsets, addresses, and I/O framing, syntax-check the parameterized solver, and make the first bounded remote attempt without waiting for a Dockerfile, cached image, or local flag. Run it before a negative control, P5, detailed evidence work, or write-up. A verified remote flag is the contest completion signal; perform only minimal private evidence saving and cleanup afterward. If the first remote attempt fails, return to the cheapest environment/protocol discriminator and permit one corrected retry.
+When an official remote endpoint is recorded, switch to Fast-to-Remote as soon as the solver is ready. If an exact local runtime exists, every newly local-successful solver version must run remotely immediately; do not wait for another local replay, a negative control, P5, detailed evidence work, or write-up. If no exact local runtime exists, statically cross-check the primitive, offsets, addresses, and I/O framing, syntax-check the first version and each materially corrected version, and run each remotely. There is no global attempt count, but never automatically replay an unchanged solver, brute-force, or flood. A verified remote flag is the contest completion signal; perform only minimal private evidence saving and cleanup afterward.
 
 Before the first remote attempt, retain one capped local-success transcript and exact runtime provenance when a local runtime exists. In `STATIC-ONLY`, retain the compact static cross-check instead. On remote failure, checkpoint the last prompt or invariant reached, keep diagnostic output enabled in the private transcript, and compare only framing, runtime offsets, and the failed invariant. Do not restart static analysis or rewrite an already passed primitive.
 
+Instrument remote runs before sending them. Emit a secret-free stage marker immediately before and after each decisive transition (`pie-leak`, `pivot`, `libc-leak`, `final-effect`, or equivalent), and emit a bounded failure reason. When parsing length/framing is uncertain, retain at most 32 raw bytes in hex with the observed length in the private transcript. Never dump an unbounded stream or put these diagnostics in the public write-up. A blank EOF without a last-known stage is insufficient evidence for correcting local/remote drift.
+
 When local succeeds but remote fails, inspect `runtime.env` before changing the exploit primitive: confirm which libc supplied the symbol offsets, whether the local loader/libc pair was exact, and whether the leak-to-base calculation assumed the same ABI. The loader reproduces local process startup; it is never sent to or executed on the remote service.
 
-For a supplied Dockerfile, treat containers and the generated `ctf-<challenge>:local` image as run-scoped resources. The launcher invokes `pwn-cleanup.sh` after Codex exits, including failures and interruptions. Do not call broad prune commands or remove base images. Use `--keep-docker` only when the user explicitly needs post-run debugging.
+For a bit-dependent saved-frame-pointer pivot, calculate the reachable stack region and success probability before spending a remote attempt. If the probability conflicts with the recorded attempt budget, seek a deterministic framing/state improvement or report the risk explicitly. Track the resulting stack alignment at every function call: a fake frame pointer can control both the pivot and ABI alignment.
+
+For a supplied Dockerfile, treat containers and the generated `ctf-<challenge>:local` image as run-scoped resources. The launcher invokes `pwn-cleanup.sh` after Codex exits, including failures and interruptions. It also terminates only descendant processes that inherited the current run ID, preventing paused solver/GDB orphans without touching pre-existing processes. Do not call broad prune commands or remove base images. Use `--keep-docker` only when the user explicitly needs post-run debugging.
 
 ## No Dockerfile
 
@@ -67,7 +80,7 @@ When `scope/remote-target.env` records a user-declared official CTF endpoint:
 
 1. Complete local primitive and solver validation when an exact local runtime exists. Without one, independently cross-check the static exploit chain and syntax-check the solver; do not treat the absent runtime as a prerequisite for the first bounded target attempt.
 2. Parameterize `work/solve.py` with pwntools `REMOTE HOST=<host> PORT=<port>`; never hard-code a second endpoint. Exit nonzero when no valid flag is obtained so the bounded harness can distinguish failure.
-3. Run only through `pwn-remote-run.sh`, with one immediate attempt by default and a second only after a bounded protocol/environment correction. Measure from remote solver start until the first validated `FLAG=` line with the harness monotonic timer.
+3. Run only through `pwn-remote-run.sh`. Invoke it immediately after every new clean local success, normally with one execution per solver version; when local execution is unavailable, invoke it after each material protocol/environment correction. The harness accepts any positive `--attempts N`, but repeated identical attempts require an explicit probabilistic reason and must not become brute force or flooding. Measure from remote solver start until the first validated `FLAG=` line with the harness monotonic timer.
 4. Do not scan ports, discover adjacent hosts, brute-force ASLR or credentials, persist a shell, pivot, or contact a scoreboard.
 5. Require `solve.py` to return the validated flag and print exactly `FLAG=<flag>` on stdout; never print that marker for an unvalidated candidate.
 6. Stop immediately after the minimum flag proof. Show `획득한 플래그: <flag>` and `원격 플래그 획득 시간: N.NNN초` immediately in the terminal and include both in the final user response. Save transcript and candidate flag under `evidence/private/`, while redacting it from `work/writeup.md`.

@@ -437,6 +437,9 @@ if [[ -f "$stage/ld.so" ]]; then
   fi
 fi
 [[ ! -f "$stage/libc.so.6" ]] || chmod 644 "$stage/libc.so.6"
+[[ ! -f "$stage/image/ld.so" ]] || chmod 755 "$stage/image/ld.so"
+[[ ! -f "$stage/image/libc.so.6" ]] || chmod 644 "$stage/image/libc.so.6"
+find "$stage" -type d -exec chmod 755 {} +
 
 write_env() {
   printf '%s=%q\n' "$1" "$2"

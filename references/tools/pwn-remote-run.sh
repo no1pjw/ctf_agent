@@ -9,7 +9,7 @@ output_file=
 max_log_bytes=${CTF_REMOTE_LOG_MAX_BYTES:-1048576}
 
 usage() {
-  echo "usage: $0 --host HOST --port PORT [--timeout SEC] [--attempts 1|2] --output FILE -- COMMAND [ARG ...]"
+  echo "usage: $0 --host HOST --port PORT [--timeout SEC] [--attempts N] --output FILE -- COMMAND [ARG ...]"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -33,7 +33,7 @@ else
 fi
 [[ "$port" =~ ^[0-9]+$ ]] && (( port >= 1 && port <= 65535 )) || { echo 'invalid port' >&2; exit 65; }
 [[ "$timeout_seconds" =~ ^[0-9]+$ ]] && (( timeout_seconds >= 1 && timeout_seconds <= 60 )) || { echo 'timeout must be 1..60' >&2; exit 65; }
-[[ "$attempts" =~ ^[12]$ ]] || { echo 'attempts must be 1 or 2' >&2; exit 65; }
+[[ "$attempts" =~ ^[1-9][0-9]*$ ]] || { echo 'attempts must be a positive integer' >&2; exit 65; }
 [[ "$max_log_bytes" =~ ^[0-9]+$ ]] && (( max_log_bytes >= 65536 && max_log_bytes <= 10485760 )) || { echo 'CTF_REMOTE_LOG_MAX_BYTES must be 65536..10485760' >&2; exit 65; }
 
 mkdir -p "$(dirname -- "$output_file")"

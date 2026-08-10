@@ -21,6 +21,13 @@
 - **가장 싼 확인법:** 제공 컨테이너에서 한 size class의 tcache와 fastbin에 서로 구분되는 표식을 넣고, `malloc`과 `calloc` 각 1회의 반환 출처만 비교한다.
 - **환경/적용 한계:** 버전과 패치에 따라 달라지는 구현 세부사항이다. zeroing 범위, chunk 검증, consolidation 가능성까지 포함해 제공 런타임에서 확인해야 하며 다른 libc에 일반화하지 않는다.
 
+## unsorted chunk 분할 뒤 remainder 경계를 누출 창으로 본다
+
+- **증상:** 큰 freed chunk에서 작은 객체를 재할당한 뒤, 그 객체의 논리 길이를 실제 user area보다 조금 크게 만들 수 있다.
+- **재사용 가능한 교훈:** 큰 unsorted chunk가 분할되면 새 객체 바로 뒤 remainder의 allocator 링크가 libc 주소를 담을 수 있다. 별도의 freed-object 출력이 없어도 짧은 over-read로 그 경계만 노출하면 libc 기준점을 얻을 수 있다. 먼저 같은 size class의 tcache 항목을 소모해 재할당 출처를 고정한다.
+- **가장 싼 확인법:** 예상 chunk 경계를 중심으로 포인터 두세 word만 출력하고, page-aligned base 후보와 제공 libc의 해당 allocator 심볼 관계가 맞는지 검사한다. 전체 힙 덤프보다 먼저 이 작은 창을 시험한다.
+- **환경/적용 한계:** 정확한 split 여부, tcache 상태, 최소 remainder 크기와 링크 위치는 allocator·libc 버전에 종속된다. 제공 libc 없이 상수를 일반화하지 않으며, unsorted 경로에 들어가지 않거나 출력 길이가 경계에 못 닿으면 쓸 수 없다.
+
 ## 정적 영역의 가짜 chunk는 인접 필드와 함께 설계한다
 
 - **증상:** non-PIE 또는 주소가 알려진 writable 정적 영역에 allocator가 받아들일 수 있는 크기 필드가 있고, 그 user area가 전역 포인터 테이블 같은 민감한 필드와 겹친다.

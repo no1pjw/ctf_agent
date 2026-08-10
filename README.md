@@ -40,10 +40,12 @@ ctf-pwn --keep-docker challenge-name
 ctf-pwn challenge-name host.example:31337
 ctf-pwn challenge-name host.example 31337
 ctf-rev --source /path/to/reversing challenge-name
-ctf-bench challenge-name
-ctf-bench --source /path/to/challenge challenge-name
-ctf-bench --remote host.example:31337 challenge-name
-ctf-bench --exact-tokens --remote host.example:31337 challenge-name
+ctf-bench-pwn --source /path/to/pwn challenge-name
+ctf-bench-pwn --remote host.example:31337 challenge-name
+ctf-bench-rev --source /path/to/rev challenge-name
+ctf-bench-web --source /path/to/web challenge-name
+ctf-bench-crypto --source /path/to/crypto challenge-name
+ctf-bench-forensics --source /path/to/forensics challenge-name
 ctf-learn challenge-name
 ctf-clean
 ctf-clean --caches --apply
@@ -51,24 +53,27 @@ ctf-clean --caches --apply
 
 ## 벤치마크
 
-`ctf-bench`는 같은 pwn 문제를 `plain Codex`와 `FAST_LOCAL`의 격리된 작업공간에서 동시에 실행합니다. 두 실행 모두 `gpt-5.6-sol`, `xhigh`, 멀티에이전트·자동 스킬 검색 비활성화 및 ephemeral non-interactive 모드를 강제하며, 실행별 Docker 이미지 이름과 이벤트 로그를 분리합니다. 실행 중에는 인증만 연결한 임시 `CODEX_HOME`을 사용하므로 전역 CTF 스킬이 plain 기준선에 섞이지 않으며, 종료 시 임시 홈을 정리합니다. 벤치마크 프롬프트는 “문제를 바로 풀어 플래그를 구하라”는 짧은 계약만 사용합니다. plain은 프로젝트 CTF 정책·스킬을 사용하지 않고, FAST_LOCAL은 간결한 `AGENTS.md`와 준비된 pwntools solver 골격을 사용합니다. FAST_LOCAL은 한 번의 좁은 정적 조사 후 solver를 작성하고 문법 검사와 원격 하니스 실행을 한 명령으로 결합하며, 막힌 증상과 맞는 피드백만 선택적으로 확인합니다. 진행 중 이벤트는 터미널에 흘려보내지 않고 파일에만 저장하며, 완료 후 한글 표시 폭을 보정한 요약 표만 출력합니다.
+`ctf-bench-{pwn,rev,web,crypto,forensics}`는 선택한 분야의 같은 문제를 `plain Codex`와 `FAST_LOCAL`의 격리된 작업공간에서 동시에 실행합니다. 기존 `ctf-bench`는 `ctf-bench-pwn`의 호환 별칭입니다. 두 실행 모두 `gpt-5.6-sol`, 추론 강도 `high`, fast service tier, 웹 탐색·멀티에이전트·자동 스킬 검색 비활성화 및 ephemeral non-interactive 모드를 강제하며, 실행별 Docker 이미지와 이벤트 로그를 분리합니다. 실행 중에는 인증만 연결한 임시 `CODEX_HOME`을 사용하므로 전역 CTF 스킬이 plain 기준선에 섞이지 않으며, 종료 시 임시 홈을 정리합니다. 프롬프트는 “문제를 그냥 바로 풀어라”는 짧은 계약만 사용합니다. plain은 프로젝트 CTF 정책·스킬을 사용하지 않고, FAST_LOCAL은 선택 분야의 간결한 `AGENTS.md`, 전문 agent 및 누적 상태를 사용합니다. 진행 이벤트는 파일에만 저장하고 완료 후 표시 폭을 보정한 요약 표만 출력합니다.
 
 ```bash
-ctf-bench challenge-name
-ctf-bench --source /path/to/challenge challenge-name
-ctf-bench --remote host.example:31337 challenge-name
-ctf-bench challenge-name host.example:31337
-ctf-bench --exact-tokens --remote host.example:31337 challenge-name
-ctf-bench --timeout 2400 --order fast-first challenge-name
+ctf-bench-pwn --source /path/to/challenge challenge-name
+ctf-bench-pwn --remote host.example:31337 challenge-name
+ctf-bench-pwn --exact-tokens --remote host.example:31337 challenge-name
+ctf-bench-rev --source /path/to/challenge challenge-name
+ctf-bench-web --source /path/to/challenge challenge-name
+ctf-bench-crypto --source /path/to/challenge challenge-name
+ctf-bench-forensics --source /path/to/challenge challenge-name
+# 자동 종료가 꼭 필요할 때만 명시
+ctf-bench-pwn --timeout 2400 challenge-name
 ```
 
-로컬 모드는 기존처럼 clean replay와 `.solved=verified`를 성공 조건으로 사용합니다. `--remote` 또는 두 번째 위치 인수로 사용자가 허가한 정확한 `HOST:PORT`를 지정한 원격 모드에서는 다른 주소와 scoreboard 접속을 금지합니다. Dockerfile·캐시 이미지·로컬 플래그가 없어도 정적으로 parameterized solver가 완성되면 공용 원격 하니스로 variant당 즉시 1회 실행합니다. 하니스가 실제 원격 플래그를 포착하는 순간 성공으로 기록하고 프로세스를 중단하며 재검증·writeup·`.solved` 판정은 생략합니다.
+Pwn 벤치는 현재 `ctf-pwn`과 같은 런타임 준비 과정을 먼저 수행합니다. 제공 libc/ld를 우선 사용하고, 누락되면 정확한 Docker 이미지에서 추출하며, 제공 libc가 이미지 libc와 다르면 원격 계산용 제공 libc와 로컬 구조 검증용 이미지 libc/ld를 섞지 않고 분리합니다. 새 solver 버전이 로컬에서 성공할 때마다 즉시 같은 버전을 정확한 원격 주소에 동기화합니다. 고정된 총 시도 제한은 없지만 변경 없는 자동 반복·무차별 대입·flood는 금지합니다. 하니스가 실제 원격 플래그를 포착하는 순간 성공으로 기록하고 재검증·writeup·`.solved` 판정 없이 종료합니다. `--remote`는 pwn 벤치에서만 사용할 수 있습니다.
 
-결과는 기본적으로 `benchmarks/runs/<run-id>/report.md`와 각 실행의 JSONL 이벤트에 남습니다. 기본 원격 모드는 플래그를 잡는 즉시 종료하므로 Codex의 마지막 `turn.completed.usage`가 오지 않은 경우 토큰을 거짓 `0` 대신 `미집계 (즉시 종료)`로 표시합니다. 정확한 토큰 비교가 필요하면 `--exact-tokens`를 추가합니다. 이 모드는 플래그 시각을 성공 시각으로 즉시 고정하고 추가 도구 호출을 차단한 채 최종 usage 이벤트만 최대 30초 기다립니다. `ctf-bench --dry-run challenge-name` 또는 `ctf-bench --dry-run --remote HOST:PORT challenge-name`으로 모델 호출 없이 고정 설정과 범위를 먼저 확인할 수 있습니다.
+결과는 `benchmarks/runs/<category>/<run-id>/report.md`와 각 실행의 JSONL 이벤트에 남습니다. 기본 제한 시간은 `0`, 즉 풀이 중 자동 종료 없음이며 사용자가 `--timeout`을 준 경우만 제한합니다. 원격 플래그 즉시 종료 때문에 마지막 usage가 오지 않으면 토큰을 거짓 `0` 대신 `미집계 (즉시 종료)`로 표시합니다. 정확한 토큰 비교가 필요하면 `--exact-tokens`를 추가합니다. `ctf-bench-pwn --dry-run challenge-name`처럼 모델 호출 없이 분야·설정·범위를 먼저 확인할 수 있습니다.
 
 리버싱 문제의 기본 원본 경로는 `$HOME/ctf-challenges/reversing`입니다. 다른 위치는 `--source` 또는 `CTF_REV_SOURCE`로 지정합니다. 제공된 Dockerfile이 없으면 바이너리를 호스트에서 실행하지 않는 STATIC-ONLY 분석으로 진행합니다.
 
-문제 풀이 모델은 기본적으로 `gpt-5.6-sol`, 추론 강도는 `ultra`입니다. `ctf-pwn`은 여기에 `service_tier="fast"`와 `fast_mode`를 명시적으로 적용합니다. 일시적으로 변경해야 할 때만 `CTF_CODEX_MODEL`, `CTF_CODEX_REASONING_EFFORT`, `CTF_CODEX_SERVICE_TIER` 환경 변수를 지정합니다.
+`ctf-pwn`은 기본적으로 `gpt-5.6-sol`, Adaptive/Fast의 추론 강도 `high`, Deep의 추론 강도 `ultra`를 사용합니다. 모든 모드에 `service_tier="fast"`와 `fast_mode`를 명시적으로 적용합니다. 일시적으로 변경해야 할 때만 `CTF_CODEX_MODEL`, `CTF_CODEX_REASONING_EFFORT`, `CTF_CODEX_SERVICE_TIER` 환경 변수를 지정합니다.
 
 `ctf-clean`은 기본적으로 미리보기만 수행합니다. `--apply`를 지정해도 `ctf-learn` 피드백, `work/solve.py`, `work/writeup.md`, `evidence/private`, `scope`는 항상 보존합니다. 문제의 `input/`은 풀이가 완료됐고 외부 원본 경로가 실제로 확인될 때만 삭제합니다. `--caches`는 다시 내려받거나 생성할 수 있는 Go 빌드, pip, uv 캐시만 추가로 정리하며 설치된 도구와 라이브러리는 제거하지 않습니다.
 
@@ -78,7 +83,7 @@ WSL 내부 파일을 삭제해도 `ext4.vhdx`의 Windows 실제 크기가 줄지
 powershell -ExecutionPolicy Bypass -File .\references\tools\ctf-compact-wsl.ps1
 ```
 
-공식 CTF pwn 서비스 주소를 함께 주면 정확한 로컬 런타임이 있을 때는 로컬 플래그 한 번 후, 없을 때는 정적 exploit chain 교차 확인과 solver 문법 검사 후 반복 검증이나 write-up보다 원격 실행을 먼저 수행합니다. Dockerfile·캐시 이미지·로컬 플래그 부재는 첫 원격 시도의 blocker가 아닙니다. 검증된 원격 플래그와 실행 시작부터 수신까지의 시간은 즉시 `획득한 플래그: ...`, `원격 플래그 획득 시간: N.NNN초`로 출력하고 `challenges/<name>/evidence/private/`에도 저장합니다. 첫 원격 시도가 실패할 때만 차이를 분석해 수정된 exploit으로 한 번 더 시도합니다. 공개 write-up에서는 원문을 가리며 scoreboard에는 자동 제출하지 않습니다. 주소를 생략하면 대상 네트워크는 계속 차단됩니다.
+공식 CTF pwn 서비스 주소를 함께 주면 정확한 로컬 런타임에서 새롭게 성공한 solver 버전마다 즉시 같은 버전을 원격 실행해 로컬·원격 차이를 확인합니다. 고정 시도 횟수 제한은 없습니다. 정확한 로컬 런타임이 없으면 정적 exploit chain 교차 확인과 문법 검사를 통과한 첫 버전 및 이후 실질적으로 수정된 버전을 원격 실행합니다. 변경 없는 exploit 자동 반복, 무차별 대입, 병렬 flood는 하지 않습니다. 검증된 원격 플래그와 실행 시작부터 수신까지의 시간은 즉시 `획득한 플래그: ...`, `원격 플래그 획득 시간: N.NNN초`로 출력하고 `challenges/<name>/evidence/private/`에도 저장합니다. 공개 write-up에서는 원문을 가리며 scoreboard에는 자동 제출하지 않습니다. 주소를 생략하면 대상 네트워크는 계속 차단됩니다.
 
 `ctf-pwn`은 분석 전에 `work/runtime/runtime.env`를 만듭니다. 문제에 `libc.so.6`와 loader가 있으면 원본을 건드리지 않고 우선 복사해 사용합니다. 한쪽이 없으면 제공된 Dockerfile로 만든 정확한 이미지 또는 이미 존재하는 문제 이미지에서 libc와 loader를 추출하고, Build ID나 파일 일치가 확인된 경우에만 서로 결합합니다. 둘이 다르면 제공 libc와 이미지 쌍을 비교용으로 분리 보존하고 어느 쪽도 원격과 동일한 정확한 로컬 런타임으로 가장하지 않으며, host libc로 대체하지 않습니다. 정확한 로컬 실행은 `pwn-run.sh --runtime-dir ... --binary ...`가 격리 컨테이너 안에서 loader와 libc를 함께 적용합니다. Docker/runtime 확보 실패는 STATIC-ONLY 분석과 허가된 첫 원격 시도를 막지 않습니다.
 
