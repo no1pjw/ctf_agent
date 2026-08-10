@@ -26,6 +26,7 @@ chmod +x \
   "$target_dir/install-wsl.sh" \
   "$target_dir/references/tools/ctf-pwn-start.sh" \
   "$target_dir/references/tools/ctf-rev-start.sh" \
+  "$target_dir/references/tools/ctf-web-start.sh" \
   "$target_dir/references/tools/ctf-bench.sh" \
   "$target_dir/references/tools/ctf-bench-metrics.py" \
   "$target_dir/references/tools/ctf-learn.sh" \
@@ -41,10 +42,14 @@ chmod +x \
   "$target_dir/references/tools/pwn-triage.sh" \
   "$target_dir/references/tools/sandbox-run.sh" \
   "$target_dir/references/tools/pwntools-template.py"
+chmod +x \
+  "$target_dir/references/tools/web-runtime.sh" \
+  "$target_dir/references/tools/web-solve-template.py"
 
 mkdir -p "$HOME/.local/bin"
 ln -sfn "$target_dir/references/tools/ctf-pwn-start.sh" "$HOME/.local/bin/ctf-pwn"
 ln -sfn "$target_dir/references/tools/ctf-rev-start.sh" "$HOME/.local/bin/ctf-rev"
+ln -sfn "$target_dir/references/tools/ctf-web-start.sh" "$HOME/.local/bin/ctf-web"
 ln -sfn "$target_dir/references/tools/ctf-bench.sh" "$HOME/.local/bin/ctf-bench"
 for bench_category in pwn rev web crypto forensics; do
   ln -sfn "$target_dir/references/tools/ctf-bench.sh" "$HOME/.local/bin/ctf-bench-$bench_category"
@@ -70,6 +75,7 @@ done
 printf 'Installed CTF agent: %s\n' "$target_dir"
 printf 'Pwn launcher:        %s\n' "$HOME/.local/bin/ctf-pwn"
 printf 'Rev launcher:        %s\n' "$HOME/.local/bin/ctf-rev"
+printf 'Web launcher:        %s\n' "$HOME/.local/bin/ctf-web"
 printf 'Benchmark command:   %s\n' "$HOME/.local/bin/ctf-bench"
 printf 'Category benchmarks: %s\n' "$HOME/.local/bin/ctf-bench-{pwn,rev,web,crypto,forensics}"
 printf 'Learning command:    %s\n' "$HOME/.local/bin/ctf-learn"

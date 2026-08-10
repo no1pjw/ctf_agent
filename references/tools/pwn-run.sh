@@ -122,6 +122,14 @@ docker_args=(
   --cpus 1
   --tmpfs /tmp:rw,noexec,nosuid,size=128m
 )
+if [[ -n "${CTF_BENCH_RUN_ID:-}" ]]; then
+  [[ "$CTF_BENCH_RUN_ID" =~ ^[A-Za-z0-9_.-]+$ ]] || { echo 'invalid CTF_BENCH_RUN_ID' >&2; exit 65; }
+  docker_args+=(--label "ctf.bench.run=$CTF_BENCH_RUN_ID")
+fi
+if [[ -n "${CTF_BENCH_VARIANT:-}" ]]; then
+  [[ "$CTF_BENCH_VARIANT" =~ ^[A-Za-z0-9_.-]+$ ]] || { echo 'invalid CTF_BENCH_VARIANT' >&2; exit 65; }
+  docker_args+=(--label "ctf.bench.variant=$CTF_BENCH_VARIANT")
+fi
 if [[ -n "$runtime_dir" ]]; then
   docker_args+=(
     --mount "type=bind,src=$runtime_dir,dst=/ctf-runtime,readonly"

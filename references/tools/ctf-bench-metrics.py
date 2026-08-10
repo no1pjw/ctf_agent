@@ -11,6 +11,7 @@ import sys
 import time
 import unicodedata
 from pathlib import Path
+from collections.abc import Iterator
 from typing import Any
 
 
@@ -77,18 +78,64 @@ def remote_flag_from_event(event: dict[str, Any]) -> str | None:
     return candidate if first_valid_flag(candidate) == candidate else None
 
 
-def read_jsonl(path: Path) -> list[dict[str, Any]]:
-    events: list[dict[str, Any]] = []
+def read_jsonl(path: Path) -> Iterator[dict[str, Any]]:
+    """Stream events so a long xhigh run never loads the JSONL into RAM."""
     if not path.exists():
-        return events
-    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
-        try:
-            value = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(value, dict):
-            events.append(value)
-    return events
+        return
+    with path.open(encoding="utf-8", errors="replace") as stream:
+        for line in stream:
+            try:
+                value = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(value, dict):
+                yield value
+
+
+def compact_event(event: dict[str, Any]) -> dict[str, Any]:
+    """Keep metrics evidence while bounding verbose reasoning/tool payloads."""
+    compact = dict(event)
+    item = compact.get("item")
+    if not isinstance(item, dict):
+        return compact
+    item = dict(item)
+    compact["item"] = item
+    item_type = item.get("type")
+    if item_type == "reasoning":
+        for key in ("text", "content", "summary"):
+            if key in item:
+                item[key] = "[reasoning omitted from benchmark log]"
+    if item_type == "command_execution":
+        output = str(item.get("aggregated_output", ""))
+        limit = 65536
+        if len(output) > limit:
+            item["aggregated_output"] = (
+                output[: limit // 2]
+                + f"\n[... {len(output) - limit} characters omitted ...]\n"
+                + output[-limit // 2 :]
+            )
+    return compact
+
+
+def action_label(command: str) -> str:
+    text = " ".join(command.split()).lower()
+    if "pwn-remote-run.sh" in text or "ctf_remote_harness" in text:
+        return "원격 exploit 실행"
+    if "docker build" in text or "pwn-build.sh" in text:
+        return "Docker 환경 빌드"
+    if "docker run" in text or "pwn-run.sh" in text:
+        return "격리 로컬 exploit 실행"
+    if "gdb" in text:
+        return "GDB 동적 분석"
+    if any(tool in text for tool in ("checksec", "readelf", "objdump", "ropgadget", "ropper", "nm ")):
+        return "바이너리·가젯 정적 분석"
+    if any(tool in text for tool in ("rg ", "grep ", "find ", "strings ")):
+        return "파일·문자열 조사"
+    if "py_compile" in text:
+        return "solver 문법 검사"
+    if "python" in text or "solve.py" in text:
+        return "분석·solver 실행"
+    return "도구 실행"
 
 
 def read_status(path: Path) -> dict[str, str]:
@@ -109,6 +156,7 @@ def command_capture(args: argparse.Namespace) -> int:
     first_flag_seen = False
     remote_flag_seen = False
     usage_deadline: float | None = None
+    active_actions: dict[str, str] = {}
 
     with output.open("w", encoding="utf-8", newline="\n") as handle:
         while True:
@@ -141,7 +189,7 @@ def command_capture(args: argparse.Namespace) -> int:
                 event["_benchmark_remote_flag"] = remote_flag
                 event["_benchmark_remote_flag_seconds"] = elapsed
 
-            handle.write(json.dumps(event, ensure_ascii=False, separators=(",", ":")) + "\n")
+            handle.write(json.dumps(compact_event(event), ensure_ascii=False, separators=(",", ":")) + "\n")
             handle.flush()
 
             candidate = first_valid_flag(combined)
@@ -153,10 +201,21 @@ def command_capture(args: argparse.Namespace) -> int:
             item = event.get("item") if isinstance(event.get("item"), dict) else {}
             if not args.quiet and event_type == "thread.started":
                 print(f"[{args.label}] Codex exec 연결 완료", flush=True)
+            elif not args.quiet and event_type == "item.started" and item.get("type") == "command_execution":
+                action = action_label(str(item.get("command", "")))
+                active_actions[str(item.get("id", ""))] = action
+                print(f"[{args.label} +{elapsed:.1f}s] 행동: {action}", flush=True)
+            elif not args.quiet and event_type == "item.completed" and item.get("type") == "command_execution":
+                action = active_actions.pop(str(item.get("id", "")), action_label(str(item.get("command", ""))))
+                exit_code = item.get("exit_code")
+                if isinstance(exit_code, int) and exit_code != 0:
+                    print(f"[{args.label} +{elapsed:.1f}s] 결과: {action} 실패 (exit {exit_code})", flush=True)
+            elif not args.quiet and event_type == "item.completed" and item.get("type") == "file_change":
+                print(f"[{args.label} +{elapsed:.1f}s] 행동: solver 또는 작업 파일 수정", flush=True)
             elif not args.quiet and event_type == "item.completed" and item.get("type") == "agent_message":
                 text = str(item.get("text", "")).replace("\n", " ").strip()
                 if text:
-                    print(f"[{args.label} +{elapsed:.1f}s] {text[:180]}", flush=True)
+                    print(f"[{args.label} +{elapsed:.1f}s] 판단: {text[:240]}", flush=True)
             if remote_flag:
                 remote_flag_seen = True
                 if not args.quiet:
@@ -393,7 +452,7 @@ def command_report(args: argparse.Namespace) -> int:
             "## 고정 설정",
             "",
             "- Model: `gpt-5.6-sol`",
-            "- Reasoning effort: `high`",
+            "- Reasoning effort: `xhigh`",
             "- Service tier: `fast`",
             "- Multi-agent: disabled",
             "- Automatic skill search: disabled",
@@ -403,7 +462,7 @@ def command_report(args: argparse.Namespace) -> int:
             f"- Success mode: {'bounded remote harness flag short-circuit' if remote_mode else 'local clean replay'}",
             "",
             "`총 토큰`은 Codex JSONL의 `turn.completed.usage`에서 받은 `input_tokens + output_tokens` 합계입니다.",
-            "플래그 즉시 종료 모드에서 usage 이벤트가 오기 전에 종료되면 0으로 오표시하지 않고 `미집계`로 표시합니다. `ctf-bench --exact-tokens`는 성공 시각을 그대로 유지한 채 최종 usage 이벤트만 제한 시간 동안 기다립니다.",
+            "원격 플래그 시각은 즉시 고정하고, 후속 도구 실행을 금지한 채 최종 `turn.completed.usage`만 제한 시간 동안 기다립니다. usage가 끝내 오지 않으면 0으로 오표시하지 않고 `미집계`로 표시합니다. 즉시 종료가 더 중요할 때만 `--no-exact-tokens`를 사용합니다.",
             (
                 "원격 모드에서는 공용 원격 하니스의 플래그 획득 증거를 포착하는 즉시 성공으로 인정하고 후속 검증을 생략합니다."
                 if remote_mode

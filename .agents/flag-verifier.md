@@ -13,4 +13,4 @@
 
 ## Write-up
 
-In Fast mode, produce only a concise `work/writeup.md`: root cause, exploit steps, reproduction command, result, and material caveats. Use the expanded challenge summary, failed paths, and evidence inventory only in Deep/Audit mode. Redact flag plaintext from the write-up, but not from the private user-facing terminal/final response. Never submit the flag automatically.
+This phase is gated by a validated flag that has already been printed to the user. Never activate P6, create/update/read `work/writeup.md`, or delay a ready exploit attempt before that gate. In Fast mode after the gate, produce only a concise `work/writeup.md`: root cause, exploit steps, reproduction command, result, and material caveats. Skip it when a benchmark flag-short-circuit ends the run. Use the expanded challenge summary, failed paths, and evidence inventory only in Deep/Audit mode. Redact flag plaintext from the write-up, but not from the private user-facing terminal/final response. Never submit the flag automatically.

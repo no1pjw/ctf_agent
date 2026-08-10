@@ -17,21 +17,22 @@ Operate only on CTF challenges, local labs, and systems for which the user has e
 3. Never execute an untrusted artifact outside `sandbox/`. Prefer offline inspection first.
 4. Route work through the phase owners below. A phase may be repeated when evidence changes.
 
-Adaptive mode is the default for every category: P0-Lite, fixed routing when the launcher already knows the category, a bounded specialist Fast Probe, P5-Lite, and automatic in-place escalation to the full P0-P6 workflow only when a defined trigger fires. For local pwnable intake, `ctf-pwn <challenge-name>` implements this directly. `--fast-only` disables escalation; `--deep` starts full P0-P6; `--audit` adds observability without changing solve rigor.
+Adaptive mode is the default for every category: P0-Lite, fixed routing when the launcher already knows the category, a bounded specialist Fast Probe, P5-Lite, and automatic in-place escalation to the full P0-P6 workflow only when a defined trigger fires. `ctf-pwn <challenge-name>` and `ctf-web <challenge-name>` implement this for local pwn and Web intake. `--fast-only` disables escalation; `--deep` starts full P0-P6; `--audit` adds observability without changing solve rigor.
 
 ## Adaptive execution
 
 - Always perform P0-Lite: authorization, artifact inventory, and separate target/build/runtime network classes.
 - Skip generic P1 classification when the launcher already selected the category.
 - Bound a Fast Probe to roughly 10 minutes, 8 major tool calls, 3 hypotheses, and 2 failed exploit trials.
-- Treat launcher inactivity and wall-clock thresholds as status warnings only. They must never terminate Codex or challenge-solving subprocesses. A passed pwn primitive checkpoint must create and immediately advance the solver scaffold; checkpoint summaries preserve invariant, strategy, constraints, and next test.
-- In Fast mode, keep state in the active session and create only the final solver and concise write-up. Do not continuously update notes, todo, command logs, or phase documents.
+- Launchers do not emit inactivity/wall-clock warnings and must never terminate an active solve. A passed pwn primitive checkpoint must create and immediately advance the solver scaffold; checkpoint summaries preserve invariant, strategy, constraints, and next test.
+- In Fast mode, keep state in the active session and create the solver first. Before a validated flag is printed, do not create, update, or read a write-up; retain only the smallest required checkpoint or private transcript. A concise write-up is post-flag work and is skipped when success short-circuits the session.
 - Escalate without restarting when source is absent, the target is stripped/obfuscated, heap/race/probabilistic behavior appears, environment/protocol remains uncertain, local and official behavior differ, two exploit trials fail, or the fast budget expires.
 - Reuse Fast results in Deep mode; never repeat completed discovery only to satisfy phase formatting.
 - For pwn with a recorded official endpoint, run every newly local-successful solver version remotely at once to minimize local/remote drift. When exact local execution is unavailable, run the statically cross-checked first version and each materially corrected version. Do not impose a global attempt count or replay an unchanged solver automatically. A missing Dockerfile, cached image, or local flag must not block the first run. Run it before repeated controls, P5, or write-up, and print a remote flag and its measured acquisition time as soon as received.
 - A retained exact image libc/loader pair may be used for one local-structure-only run before scarce remote attempts when a pwn chain is multi-stage, alignment-sensitive, or probabilistic. Keep image and supplied-libc calculations separate, instrument each remote stage, and never claim that this structural run validates remote offsets.
 - Pwn solving must remain offline and independent: disable browser/web/search tools and never retrieve GitHub solutions, blogs, or challenge write-ups. Use only supplied artifacts, local tools, durable feedback, the controlled Docker build harness, and the exact recorded endpoint for bounded exploit execution.
 - Absence of a Dockerfile is not a blocker or an escalation trigger by itself. If no matching cached image exists, declare `STATIC-ONLY`, continue with source/static analysis, avoid Docker retries or host execution, and request an exact runtime only when a decisive dynamic test is genuinely required.
+- For Web challenges, inspect and start a supplied Compose file before a standalone Dockerfile. Run a disposable source copy, rebind published ports to loopback, make runtime networks internal, reject unsafe host/device/privileged access, and record the origin in `work/web-runtime.env` before HTTP traffic.
 
 ## Shared execution environment
 
@@ -63,7 +64,7 @@ Adaptive mode is the default for every category: P0-Lite, fixed routing when the
 ## Operating contract
 
 - Keep raw inputs immutable and work on copies. Do not generate checksum records.
-- Default to `work/solve.py` and a concise `work/writeup.md`. Create detailed notes, todo, command logs, and evidence packets only in Deep/Audit mode or when a long-running checkpoint is necessary.
+- Default to `work/solve.py` during solving. Create `work/writeup.md` only after the validated flag has already been printed to the user. Create detailed notes, todo, command logs, and evidence packets only in Deep/Audit mode or when a long-running checkpoint is necessary.
 - Separate observed facts, inferences, and hypotheses.
 - Use the smallest test that can falsify a hypothesis.
 - Do not scan unrelated hosts, pivot outside the challenge, contact real users, persist, or cause denial of service.

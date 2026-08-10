@@ -203,7 +203,8 @@ prompt=$(cat <<EOF
 - 정책: AGENTS.md와 \$ctf-pwn 스킬을 따르되 반복 설명하지 말고 state.json, runtime.env, intake-exec.txt, feedback index를 확인한 뒤 가장 싼 분석 명령부터 실행하라.
 - 런타임: $compact_runtime runtime.env의 libc/ld 출처를 지키고 host 런타임이나 미검증 혼합 쌍을 사용하지 마라.
 - 제한: 한국어로 진행하고 웹 검색·호스트 바이너리 실행·플래그 자동 제출을 금지한다.
-- 결과: work/solve.py와 간결한 work/writeup.md만 만들고, 실제 검증된 플래그만 즉시 출력한 뒤 work/.solved에 verified를 기록하라.
+- 최우선 결과: 플래그 검증 전에는 work/solve.py와 꼭 필요한 비공개 진단만 만들고 work/writeup.md는 읽거나 만들거나 수정하지 마라. 준비된 exploit은 문서 작업보다 먼저 즉시 실행하라.
+- 성공 이후: 실제 검증된 플래그와 획득 시간을 먼저 즉시 출력한 다음 work/.solved에 verified를 기록하고, 세션이 계속될 때만 간결한 work/writeup.md를 작성하라.
 EOF
 )
 

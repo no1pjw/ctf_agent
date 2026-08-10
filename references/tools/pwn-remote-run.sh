@@ -49,7 +49,7 @@ monotonic_ns() {
 stream_remote_output() {
   local start_ns=$1
   local capture_file=$2
-  local line now_ns elapsed_ms
+  local line now_ns elapsed_ms flag_marker
   local flag_printed=false
   local truncated=false current_size line_size
   current_size=$(stat -c %s -- "$capture_file" 2>/dev/null || printf '0')
@@ -64,13 +64,14 @@ stream_remote_output() {
       printf '[transcript truncated at %s bytes]\n' "$max_log_bytes" >> "$capture_file"
       truncated=true
     fi
-    if [[ "$flag_printed" == false && "$line" =~ ^FLAG=[^[:cntrl:]]+$ ]]; then
+    flag_marker=$(printf '%s\n' "$line" | grep -aoE 'FLAG=[A-Za-z][A-Za-z0-9_]{0,31}\{[^{}[:cntrl:]]{1,256}\}' | tail -n 1 || true)
+    if [[ "$flag_printed" == false && -n "$flag_marker" ]]; then
       if (( current_size + line_size > max_log_bytes )); then
-        printf '%s\n' "$line" >> "$capture_file"
+        printf '%s\n' "$flag_marker" >> "$capture_file"
       fi
       now_ns="$(monotonic_ns)"
       elapsed_ms=$(( (now_ns - start_ns) / 1000000 ))
-      printf '\n획득한 플래그: %s\n' "${line#FLAG=}"
+      printf '\n획득한 플래그: %s\n' "${flag_marker#FLAG=}"
       printf '원격 플래그 획득 시간: %d.%03d초\n' "$((elapsed_ms / 1000))" "$((elapsed_ms % 1000))"
       flag_printed=true
     fi
@@ -88,7 +89,7 @@ for ((attempt = 1; attempt <= attempts; attempt++)); do
   status=${PIPESTATUS[0]}
   set -e
   printf 'exit_status=%s\n' "$status" | tee -a "$output_file"
-  flag_line="$(grep -aE '^FLAG=[^[:cntrl:]]+$' "$output_file" | tail -n 1 || true)"
+  flag_line="$(grep -aoE 'FLAG=[A-Za-z][A-Za-z0-9_]{0,31}\{[^{}[:cntrl:]]{1,256}\}' "$output_file" | tail -n 1 || true)"
   if [[ -n "$flag_line" ]]; then
     status=0
     break

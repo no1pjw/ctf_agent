@@ -212,8 +212,13 @@ ln -s shimes/CLAUDE.md "$output_real/CLAUDE.md"
 
 cp -- "$source_real/references/export/gitignore.public" "$output_real/.gitignore"
 
-launcher="$output_real/references/tools/ctf-pwn-start.sh"
-sed -i 's|^source_root=${CTF_PWNABLE_SOURCE:-.*}$|source_root=${CTF_PWNABLE_SOURCE:-$HOME/ctf-challenges/pwnable}|' "$launcher"
+pwn_launcher="$output_real/references/tools/ctf-pwn-start.sh"
+web_launcher="$output_real/references/tools/ctf-web-start.sh"
+bench_launcher="$output_real/references/tools/ctf-bench.sh"
+sed -i 's|^source_root=${CTF_PWNABLE_SOURCE:-.*}$|source_root=${CTF_PWNABLE_SOURCE:-$HOME/ctf-challenges/pwnable}|' "$pwn_launcher"
+sed -i 's|^source_root=${CTF_WEB_SOURCE:-.*}$|source_root=${CTF_WEB_SOURCE:-$HOME/ctf-challenges/web}|' "$web_launcher"
+sed -i 's|^  pwn) source_root=${CTF_PWNABLE_SOURCE:-.*} ;;$|  pwn) source_root=${CTF_PWNABLE_SOURCE:-$HOME/ctf-challenges/pwnable} ;;/|' "$bench_launcher"
+sed -i 's|^  web) source_root=${CTF_WEB_SOURCE:-.*} ;;$|  web) source_root=${CTF_WEB_SOURCE:-$HOME/ctf-challenges/web} ;;/|' "$bench_launcher"
 
 scan_output="$output_real/.ctf-export-scan.txt"
 unix_user_pattern='/mnt/c/'"Users/"

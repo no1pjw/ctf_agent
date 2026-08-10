@@ -24,15 +24,17 @@ When an incompatible pwn manifest retains an exact image libc/loader pair, one s
 
 Pwn solving is offline-first and solution lookup is prohibited. Do not browse the web, use search engines or GitHub search, retrieve blogs/write-ups, or use shell/MCP/browser/computer tools to obtain challenge solutions. The only target-network exception is the exact recorded endpoint through the bounded exploit client. Controlled dependency access by the supplied Docker build harness is a separate build-network class and does not authorize research browsing.
 
+For local Web challenges, `ctf-web` records one loopback origin after starting a sanitized supplied Compose project or Dockerfile image. Compose has priority. Published ports must bind to loopback, runtime networks must be internal, and privileged mode, host namespaces, devices, external networks, and bind mounts outside the disposable service copy are forbidden. HTTP clients may contact only the recorded origin; redirects never broaden scope. Build dependency traffic remains separate from runtime traffic.
+
 ## R-4 Evidence
 
-In default Fast mode, retain only the final solver, concise write-up, decisive output, environment assumptions, and verification controls. Detailed command logs, timestamps, phase notes, and raw evidence packets are required only in Deep/Audit mode or for a long-running checkpoint. Never generate or check SHA-256 records; redact tokens, personal data, and flags from public write-ups when required.
+In default Fast mode, retain the final solver, decisive output, environment assumptions, and verification controls. Before a validated flag is printed, do not create, update, or read a write-up; documentation cannot delay a ready exploit attempt. A concise write-up may be produced only after that gate and is skipped for benchmark flag-short-circuit runs. Detailed command logs, timestamps, phase notes, and raw evidence packets are required only in Deep/Audit mode or for a long-running checkpoint. Never generate or check SHA-256 records; redact tokens, personal data, and flags from public write-ups when required.
 
 Storage compaction must never delete category feedback, `work/solve.py`, `work/writeup.md`, `scope`, or `evidence/private`. Duplicate challenge inputs may be removed only after completion and only when a readable external source copy is recorded or discoverable. Incomplete challenges and unknown files are preserved. Rebuildable language caches and core dumps are not learning records.
 
 Bound operational memory: `work/state.json` retains at most 20 compact stage transitions, remote transcripts default to 1 MiB, and full dumps belong only in a disposable sandbox. Existing category feedback is durable knowledge and is never pruned by workspace or cache cleanup.
 
-For pwn, launcher-displayed inactivity and wall-clock budgets are enforceable stop conditions, not advisory text. Preserve the latest structured checkpoint and solver scaffold before termination. Cleanup may target only Docker resources for the named challenge and processes that inherited the current run ID; never kill unrelated or pre-existing processes.
+Launchers do not terminate active solves or emit file-inactivity/time heartbeat warnings. Cleanup may target only Docker resources for the named challenge and processes that inherited the current run ID; never kill unrelated or pre-existing processes.
 
 ## R-5 Reproducibility
 
