@@ -14,6 +14,8 @@ description: Solve explicitly authorized CTF pwn challenges from supplied artifa
 3. Run one narrow combined probe, choose the cheapest falsifiable hypothesis, and create or edit `work/solve.py` as soon as a primitive is plausible. Open one matching playbook/feedback document only after a concrete blocker identifies the topic.
 4. Before a validated flag, never read, create, or modify `work/writeup.md`. A benchmark skips write-up entirely.
 
+The objective function is minimum time to a validated flag. Rank candidate chains by expected remaining steps, required leaks, environment dependencies, and failure surface. Prefer an existing `win`/flag path, one direct call, or the shortest controllable return/hook effect over a more general arbitrary-read/write or ORW framework. Portability, elegance, and exploit generality are secondary unless the short path is disproved.
+
 ## Runtime and execution
 
 - `runtime_status=ready`: use the recorded libc for offsets and the matching loader/libc pair through `pwn-run.sh`; never use host libc, `LD_PRELOAD` alone, or patch the input binary.
@@ -21,6 +23,7 @@ description: Solve explicitly authorized CTF pwn challenges from supplied artifa
 - `runtime_status=not-applicable`: this is valid when there is no supplied dynamic userland target. Do not mistake a build/container runtime for the challenge target's libc/loader.
 - Missing Docker/runtime is non-fatal: continue STATIC-ONLY and use the exact recorded official endpoint only after a parameterized solver is statically cross-checked.
 - All target execution goes through the provided Docker/sandbox harness. A generated remote client may contact only `scope/remote-target.env`.
+- Never invoke `pwn-run.sh IMAGE` as a probe. A bare image may start a long-lived QEMU/service CMD. Use an explicit bounded command for inspection; use `pwn-run.sh --service IMAGE` only inside a solver that immediately drives stdin/stdout and closes it. A local timeout ends only that harness-owned container, then solving continues.
 
 ## Fast path
 
@@ -28,6 +31,10 @@ description: Solve explicitly authorized CTF pwn challenges from supplied artifa
 - Define required gadget semantics first, run `pwn-gadget-index.sh` once, reuse its cache, and stop searching when scarcity is established. Switch to existing calls/dispatch, leaks, ret2dlresolve, or another evidence-backed primitive.
 - Prove only reachability -> control/leak -> calculation -> final effect. Prefer the shortest challenge-specific pwntools solver; do not build a generic socket/argument framework.
 - Combine syntax check and the next local/remote execution in one command when possible.
+- Do not leave a direct service invocation pending while continuing static work. One active local service per variant is the maximum; wait for or close it before another local execution.
+- Once source or one probe establishes the primitive, allow at most one targeted layout/offset discriminator before writing the first solver. Do not finish a comprehensive object map first.
+- Do not run gadget indexing merely because control flow or UAF exists. First test whether an existing function, imported call, writable hook/object, return slot, or direct command path completes the flag with fewer stages. Index gadgets only for the already-selected shortest chain.
+- A heap/UAF challenge is not automatically Deep. Stay Fast while the primitive and a direct flag chain are concrete; escalate only after two evidence-bearing solver failures or a genuinely unresolved invariant.
 
 ## Complex target discipline
 
@@ -48,6 +55,6 @@ description: Solve explicitly authorized CTF pwn challenges from supplied artifa
 
 - Keep ordinary Fast work in the active session. Write a checkpoint only after roughly 10 minutes, two failed exploit trials, a probabilistic/multi-stage handoff, or a real interruption risk. In benchmarks, do not checkpoint before the flag.
 - Checkpoint only `invariant`, `strategy`, `constraints`, and `next`; never store flags, dumps, or command transcripts in state.
-- Escalate in place only for genuinely unresolved source absence, obfuscation, heap/race/probabilistic behavior, environment mismatch, or two evidence-bearing exploit failures. Reuse all passed stages.
+- Escalate in place only for genuinely unresolved source absence, obfuscation, race/probabilistic behavior, environment mismatch, or two evidence-bearing exploit failures. Heap usage alone is not an escalation trigger. Reuse all passed stages.
 
 Return the primitive chain, exact environment, `work/solve.py`, decisive diagnostics, and the validated flag. Never generalize the exploit to unrelated targets or submit the flag automatically.

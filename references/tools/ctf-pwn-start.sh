@@ -203,7 +203,7 @@ prompt=$(cat <<EOF
 - 시작: \$ctf-pwn 스킬과 runtime.env, intake-exec.txt, 비어 있지 않은 state.json만 읽고 바로 가장 싼 결합 분석을 실행하라. HARD_RULES, role, playbook, ruleset, 전체 feedback index는 시작할 때 읽지 마라.
 - 런타임: $compact_runtime runtime.env의 libc/ld 출처를 지키고 host 런타임이나 미검증 혼합 쌍을 사용하지 마라.
 - 제한: 한국어로 진행하고 웹 검색·호스트 바이너리 실행·플래그 자동 제출을 금지한다.
-- 최우선 결과: 짧은 결합 probe -> work/solve.py -> 실행 순서로 진행하라. 환경·전송 실패는 exploit 실패와 분리하고 같은 분석을 처음부터 반복하지 마라. 플래그 전에는 writeup을 건드리지 마라.
+- 최우선 결과: 플래그까지 남은 단계가 가장 적은 체인을 선택해 짧은 결합 probe -> work/solve.py -> 실행 순서로 진행하라. win/직접 호출/짧은 반환·hook 경로가 있으면 범용 arbitrary-RW·ORW·gadget 체인보다 우선하고, heap이라는 이유만으로 Deep에 들어가지 마라. 환경·전송 실패는 exploit 실패와 분리하며 플래그 전에는 writeup을 건드리지 마라.
 - 성공 이후: 실제 검증된 플래그와 획득 시간을 먼저 즉시 출력한 다음 work/.solved에 verified를 기록하고, 세션이 계속될 때만 간결한 work/writeup.md를 작성하라.
 EOF
 )

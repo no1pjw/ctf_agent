@@ -3,20 +3,25 @@ set -euo pipefail
 
 entrypoint=
 timeout_seconds=15
+kill_after_seconds=${CTF_PWN_KILL_AFTER_SECONDS:-2}
 output_file=
 runtime_dir=
 structural_runtime_dir=
 binary_path=
+service_mode=false
 docker_bin=${CTF_DOCKER_BIN:-docker}
 runtime_entrypoint=/ctf-runtime/ld.so
 runtime_library_dir=/ctf-runtime
 
 show_usage() {
   cat <<'EOF'
-usage: pwn-run.sh [--entrypoint PATH] [--timeout SEC] [--output FILE] IMAGE [COMMAND ...]
+usage: pwn-run.sh [--entrypoint PATH] [--timeout SEC] [--output FILE] IMAGE COMMAND [ARG ...]
+       pwn-run.sh --service [--entrypoint PATH] [--timeout SEC] [--output FILE] IMAGE [ARG ...]
        pwn-run.sh --runtime-dir DIR --binary FILE [--timeout SEC] [--output FILE] IMAGE [ARG ...]
        pwn-run.sh --structural-runtime-dir DIR --binary FILE [--timeout SEC] [--output FILE] IMAGE [ARG ...]
 
+Bare IMAGE execution is rejected because an image CMD may be a long-running
+service. Use --service only from a solver that actively drives that service.
 The runtime form mounts a verified libc/loader bundle and invokes the target
 through /ctf-runtime/ld.so --library-path /ctf-runtime inside the sandbox.
 The structural form uses the exact image libc/loader recorded in an incompatible
@@ -28,6 +33,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --entrypoint) entrypoint=${2:-}; shift 2 ;;
     --timeout) timeout_seconds=${2:-}; shift 2 ;;
+    --service) service_mode=true; shift ;;
     --output) output_file=${2:-}; shift 2 ;;
     --runtime-dir) runtime_dir=${2:-}; shift 2 ;;
     --structural-runtime-dir) structural_runtime_dir=${2:-}; shift 2 ;;
@@ -46,6 +52,15 @@ if [[ $# -lt 1 ]]; then
   show_usage >&2
   exit 64
 fi
+
+[[ "$timeout_seconds" =~ ^[0-9]+$ ]] && (( timeout_seconds >= 1 && timeout_seconds <= 900 )) || {
+  echo '--timeout must be 1..900 seconds' >&2
+  exit 65
+}
+[[ "$kill_after_seconds" =~ ^[0-9]+$ ]] && (( kill_after_seconds >= 1 && kill_after_seconds <= 30 )) || {
+  echo 'CTF_PWN_KILL_AFTER_SECONDS must be 1..30 seconds' >&2
+  exit 65
+}
 
 if [[ -n "$runtime_dir" || -n "$structural_runtime_dir" || -n "$binary_path" ]]; then
   [[ -n "$binary_path" ]] || {
@@ -109,7 +124,16 @@ fi
 
 image=$1
 shift
-"$docker_bin" image inspect "$image" >/dev/null 2>&1 || { echo "image not found: $image" >&2; exit 66; }
+timeout --kill-after="${kill_after_seconds}s" 10 \
+  "$docker_bin" image inspect "$image" >/dev/null 2>&1 || {
+    echo "image unavailable or Docker inspect timed out: $image" >&2
+    exit 66
+  }
+
+if [[ -z "$runtime_dir" && -z "$structural_runtime_dir" && $# -eq 0 && "$service_mode" == false ]]; then
+  echo 'refusing bare IMAGE execution: pass an explicit COMMAND, or use --service from an active solver' >&2
+  exit 64
+fi
 
 docker_args=(
   run --rm --interactive
@@ -122,6 +146,25 @@ docker_args=(
   --cpus 1
   --tmpfs /tmp:rw,noexec,nosuid,size=128m
 )
+
+run_tmp_dir=$(mktemp -d "${TMPDIR:-/tmp}/ctf-pwn-run.XXXXXX")
+cid_file="$run_tmp_dir/container.cid"
+cleanup_owned_container() {
+  local cid=
+  if [[ -s "$cid_file" ]]; then
+    IFS= read -r cid < "$cid_file" || true
+    if [[ "$cid" =~ ^[0-9a-f]{12,64}$ ]]; then
+      timeout --kill-after="${kill_after_seconds}s" 5 \
+        "$docker_bin" rm --force "$cid" >/dev/null 2>&1 || true
+    fi
+  fi
+  rm -f -- "$cid_file"
+  rmdir -- "$run_tmp_dir" 2>/dev/null || true
+}
+trap cleanup_owned_container EXIT
+trap 'exit 130' INT
+trap 'exit 143' HUP TERM
+docker_args+=(--cidfile "$cid_file")
 if [[ -n "${CTF_BENCH_RUN_ID:-}" ]]; then
   [[ "$CTF_BENCH_RUN_ID" =~ ^[A-Za-z0-9_.-]+$ ]] || { echo 'invalid CTF_BENCH_RUN_ID' >&2; exit 65; }
   docker_args+=(--label "ctf.bench.run=$CTF_BENCH_RUN_ID")
@@ -154,10 +197,22 @@ fi
 if [[ -n "$output_file" ]]; then
   mkdir -p "$(dirname -- "$output_file")"
   set +e
-  timeout --foreground "$timeout_seconds" "$docker_bin" "${docker_args[@]}" 2>&1 | tee "$output_file"
+  timeout --kill-after="${kill_after_seconds}s" "$timeout_seconds" \
+    "$docker_bin" "${docker_args[@]}" 2>&1 | tee "$output_file"
   status=${PIPESTATUS[0]}
   set -e
+  if [[ $status -eq 124 || $status -eq 137 ]]; then
+    printf 'local_run_timeout=%ss; owned container cleanup requested\n' "$timeout_seconds" >&2
+  fi
   exit "$status"
 fi
 
-exec timeout --foreground "$timeout_seconds" "$docker_bin" "${docker_args[@]}"
+set +e
+timeout --kill-after="${kill_after_seconds}s" "$timeout_seconds" \
+  "$docker_bin" "${docker_args[@]}"
+status=$?
+set -e
+if [[ $status -eq 124 || $status -eq 137 ]]; then
+  printf 'local_run_timeout=%ss; owned container cleanup requested\n' "$timeout_seconds" >&2
+fi
+exit "$status"

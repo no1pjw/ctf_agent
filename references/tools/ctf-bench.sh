@@ -51,6 +51,8 @@ pwn 기본 조작법:
   CODEX_BIN           Codex CLI 경로
   CTF_BENCH_MEMORY_HIGH_MB 실행별 memory pressure 기준(기본 1536)
   CTF_BENCH_MEMORY_MAX_MB  실행별 최대 메모리(기본 2048)
+  CTF_BENCH_MIN_HOST_FREE_MB 시작에 필요한 Windows 여유 공간(기본 61440)
+  CTF_BENCH_TRIM_INTERVAL_SECONDS 실행 중 fstrim 간격(기본 120, 0=비활성)
 EOF
 }
 
@@ -63,6 +65,8 @@ exact_tokens=true
 usage_grace_seconds=${CTF_BENCH_USAGE_GRACE_SECONDS:-45}
 memory_high_mb=${CTF_BENCH_MEMORY_HIGH_MB:-1536}
 memory_max_mb=${CTF_BENCH_MEMORY_MAX_MB:-2048}
+min_host_free_mb=${CTF_BENCH_MIN_HOST_FREE_MB:-61440}
+trim_interval_seconds=${CTF_BENCH_TRIM_INTERVAL_SECONDS:-120}
 positionals=()
 
 while [[ $# -gt 0 ]]; do
@@ -112,6 +116,7 @@ fi
 [[ "$usage_grace_seconds" =~ ^[1-9][0-9]*$ ]] || { printf 'CTF_BENCH_USAGE_GRACE_SECONDS는 1 이상의 정수여야 합니다: %s\n' "$usage_grace_seconds" >&2; exit 65; }
 [[ "$memory_high_mb" =~ ^[0-9]+$ && "$memory_max_mb" =~ ^[0-9]+$ ]] || { echo '벤치 메모리 값은 정수여야 합니다.' >&2; exit 65; }
 (( memory_high_mb >= 512 && memory_max_mb >= memory_high_mb )) || { echo '메모리는 512MiB 이상이며 HIGH <= MAX여야 합니다.' >&2; exit 65; }
+[[ "$min_host_free_mb" =~ ^[0-9]+$ && "$trim_interval_seconds" =~ ^[0-9]+$ ]] || { echo '벤치 저장공간 보호 값은 0 이상의 정수여야 합니다.' >&2; exit 65; }
 [[ "$run_order" == plain-first || "$run_order" == fast-first ]] || { printf '잘못된 실행 순서입니다: %s\n' "$run_order" >&2; exit 65; }
 
 remote_enabled=false
@@ -211,6 +216,7 @@ if [[ "$dry_run" == true ]]; then
   printf 'Docker 구성:      이미지 1회 준비·공유, variant별 독립 --rm 컨테이너\n'
   printf 'Docker 캐시:      문제별 공용 이미지 1개 유지, 이전 교체본과 실행 컨테이너 정리\n'
   printf '실행별 메모리:    high=%sMiB max=%sMiB\n' "$memory_high_mb" "$memory_max_mb"
+  printf '저장공간 보호:    시작 여유 %sMiB, 실행 중 trim 간격 %s초\n' "$min_host_free_mb" "$trim_interval_seconds"
   printf '세션 저장:        비활성화(--ephemeral)\n'
   printf '토큰 집계:        %s\n' "$([[ "$exact_tokens" == true ]] && printf '최종 usage 대기(최대 %s초)' "$usage_grace_seconds" || printf '즉시 종료; usage 미도착 시 미집계')"
   exit 0
@@ -231,9 +237,23 @@ command -v mktemp >/dev/null 2>&1 || { echo 'mktemp가 필요합니다.' >&2; ex
 command -v find >/dev/null 2>&1 || { echo 'find가 필요합니다.' >&2; exit 69; }
 [[ -f "$source_codex_home/auth.json" ]] || { printf 'Codex 인증 파일을 찾을 수 없습니다: %s\n' "$source_codex_home/auth.json" >&2; exit 69; }
 
+if [[ "$category" == pwn && -d /mnt/c ]]; then
+  if [[ -x /usr/sbin/fstrim ]] && command -v sudo >/dev/null 2>&1; then
+    sudo -n /usr/sbin/fstrim -av >/dev/null 2>&1 || true
+  fi
+  host_free_mb=$(df -Pm /mnt/c | awk 'NR == 2 {print $4}')
+  if [[ "$host_free_mb" =~ ^[0-9]+$ ]] && (( host_free_mb < min_host_free_mb )); then
+    printf '벤치마크 시작 거부: Windows 여유 공간이 %sMiB이며 최소 %sMiB가 필요합니다.\n' "$host_free_mb" "$min_host_free_mb" >&2
+    printf 'CTF_BENCH_MIN_HOST_FREE_MB로 기준을 조정할 수 있지만 디스크 0GB 재발 위험이 있습니다.\n' >&2
+    exit 78
+  fi
+fi
+
 run_id="$(date -u +%Y%m%dT%H%M%SZ)-$$"
 run_root="$bench_root/runs/$category/$run_id"
-plain_root="$run_root/plain"
+plain_archive_root="$run_root/plain"
+plain_workspace_parent="${TMPDIR:-/tmp}/ctf-bench-plain-workspaces"
+plain_root="$plain_workspace_parent/$run_id"
 fast_root="$run_root/fast-local"
 plain_input="$plain_root/input"
 plain_work="$plain_root/work"
@@ -245,14 +265,18 @@ fast_work="$fast_challenge/work"
 common_tools="$run_root/tools"
 common_remote_harness="$common_tools/pwn-remote-run.sh"
 common_docker_runner="$common_tools/pwn-run.sh"
+plain_tools="$plain_root/tools"
+plain_remote_harness="$plain_tools/pwn-remote-run.sh"
+plain_docker_runner="$plain_tools/pwn-run.sh"
 image_slug=$(printf '%s' "$challenge_name" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9._-]/-/g')
 shared_image="ctf-bench-cache-$category-$image_slug:local"
 shared_image_ready=false
 shared_image_id_before=
 benchmark_codex_home_parent="${XDG_CACHE_HOME:-$HOME/.cache}/ctf-bench-codex-homes"
 benchmark_codex_home_root="$benchmark_codex_home_parent/$run_id"
+trim_watchdog_pid=
 
-mkdir -p "$plain_input" "$plain_work" "$plain_scope" "$plain_evidence" \
+mkdir -p "$plain_input" "$plain_work" "$plain_scope" "$plain_evidence" "$plain_tools" \
   "$fast_input" "$fast_work" "$fast_challenge/evidence/private" \
   "$fast_challenge/scope" "$run_root/metrics" "$common_tools" \
   "$benchmark_codex_home_root/plain" "$benchmark_codex_home_root/fast_local"
@@ -284,6 +308,41 @@ trim_wsl_free_blocks() {
   else
     printf 'WSL 빈 블록 반환: 건너뜀 (fstrim 권한 또는 파일시스템 상태 확인 필요)\n' >&2
   fi
+}
+
+start_trim_watchdog() {
+  [[ "$category" == pwn ]] || return 0
+  (( trim_interval_seconds > 0 )) || return 0
+  [[ -x /usr/sbin/fstrim ]] || return 0
+  command -v sudo >/dev/null 2>&1 || return 0
+  sudo -n -l /usr/sbin/fstrim -av >/dev/null 2>&1 || return 0
+
+  (
+    trap - EXIT INT TERM HUP
+    while sleep "$trim_interval_seconds"; do
+      sudo -n /usr/sbin/fstrim -av >/dev/null 2>&1 || true
+    done
+  ) &
+  trim_watchdog_pid=$!
+}
+
+stop_trim_watchdog() {
+  [[ -n "$trim_watchdog_pid" ]] || return 0
+  kill -TERM "$trim_watchdog_pid" 2>/dev/null || true
+  wait "$trim_watchdog_pid" 2>/dev/null || true
+  trim_watchdog_pid=
+}
+
+cleanup_plain_workspace() {
+  case "$plain_root" in
+    "$plain_workspace_parent"/*) ;;
+    *) printf 'plain 격리 작업공간 정리 거부: %s\n' "$plain_root" >&2; return 1 ;;
+  esac
+  if [[ -d "$plain_root" ]]; then
+    find "$plain_root" -depth -mindepth 1 -delete
+    rmdir -- "$plain_root" 2>/dev/null || true
+  fi
+  rmdir -- "$plain_workspace_parent" 2>/dev/null || true
 }
 
 docker_tracking=false
@@ -352,14 +411,17 @@ cleanup_benchmark_docker_resources() {
 cleanup_benchmark_run() {
   local status=$?
   trap - EXIT
+  stop_trim_watchdog || true
   cleanup_benchmark_docker_resources || true
   cleanup_benchmark_codex_homes || true
+  cleanup_plain_workspace || true
   trim_wsl_free_blocks || true
   exit "$status"
 }
 
 snapshot_benchmark_docker_resources
 trap cleanup_benchmark_run EXIT
+start_trim_watchdog
 
 copy_source() {
   local destination=$1
@@ -424,7 +486,9 @@ prepare_pwn_runtime() {
 if [[ "$category" == pwn ]]; then
   mkdir -p "$fast_work/runtime"
   cp -a -- "$agent_root/references/tools/pwn-run.sh" "$common_docker_runner"
+  cp -a -- "$agent_root/references/tools/pwn-run.sh" "$plain_docker_runner"
   chmod +x "$common_docker_runner"
+  chmod +x "$plain_docker_runner"
   if [[ -f "$fast_input/Dockerfile" ]]; then
     command -v docker >/dev/null 2>&1 || { echo 'Dockerfile이 있는 pwn 벤치에는 Docker CLI가 필요합니다.' >&2; exit 69; }
     prepare_shared_image "$fast_input" "$run_root/metrics/shared-image.log" || true
@@ -450,7 +514,7 @@ if [[ "$shared_image_ready" == true ]]; then
 fi
 if [[ "$category" == pwn ]]; then
   if [[ "$shared_image_ready" == true ]]; then
-    docker_benchmark_rule="- 로컬 실행은 공용 읽기 전용 이미지 $shared_image와 \"\$CTF_BENCH_DOCKER_RUNNER\"를 사용하라. plain과 FAST_LOCAL은 같은 이미지를 쓰지만 매 호출마다 서로 독립된 --rm 컨테이너를 생성한다. 이미지를 다시 빌드·태그·삭제하거나 상대 variant의 컨테이너를 재사용하지 마라."
+    docker_benchmark_rule="- 로컬 실행은 공용 읽기 전용 이미지 $shared_image와 \"\$CTF_BENCH_DOCKER_RUNNER\"를 사용하라. plain과 FAST_LOCAL은 같은 이미지를 쓰지만 매 호출마다 서로 독립된 --rm 컨테이너를 생성한다. 이미지를 다시 빌드·태그·삭제하거나 상대 variant의 컨테이너를 재사용하지 마라. bare IMAGE 호출은 금지한다. 검사는 종료되는 명시적 COMMAND를 사용하고, 이미지 기본 QEMU/service CMD가 필요할 때만 solver 내부에서 --service로 실행해 I/O와 종료를 직접 소유하라."
   else
     docker_benchmark_rule='- 준비된 공용 Docker 이미지가 없다. Docker를 재시도하거나 문제 바이너리를 호스트에서 실행하지 말고 STATIC-ONLY 분석을 계속하라.'
   fi
@@ -466,7 +530,9 @@ fi
 
 if [[ "$remote_enabled" == true ]]; then
   cp -a -- "$agent_root/references/tools/pwn-remote-run.sh" "$common_remote_harness"
+  cp -a -- "$agent_root/references/tools/pwn-remote-run.sh" "$plain_remote_harness"
   chmod +x "$common_remote_harness"
+  chmod +x "$plain_remote_harness"
   printf 'authorization=user-supplied-ctf-endpoint\ntarget_network=exact-endpoint-only\nremote_host=%s\nremote_port=%s\nscoreboard=denied\n' \
     "$remote_host" "$remote_port" > "$plain_scope/benchmark.env"
   printf 'authorization=user-supplied-ctf-endpoint\ntarget_network=exact-endpoint-only\nremote_host=%s\nremote_port=%s\nscoreboard=denied\n' \
@@ -637,7 +703,7 @@ $authorization_context
 - 입력: challenges/$challenge_name/input
 - 시작: ctf-pwn 스킬, runtime.env, intake-exec.txt, 비어 있지 않은 state.json만 읽고 바로 짧은 결합 probe를 실행한다. HARD_RULES, role, playbook, ruleset, 전체 feedback index는 선로딩하지 않는다.
 - 모드: adaptive, gpt-5.6-sol xhigh fast. 웹 검색과 write-up 조회, 서브에이전트, 호스트 바이너리 실행, scoreboard 제출은 금지한다.
-- 최우선 결과: 환경·전송 실패와 exploit 실패를 분리하고, 같은 분석을 반복하지 말고 challenges/$challenge_name/work/solve.py를 가장 빨리 실행해 플래그를 얻어라. 벤치마크에서는 writeup과 사전 checkpoint를 생략하라.
+- 최우선 결과: 플래그까지 남은 단계가 가장 적은 체인을 선택하라. win/직접 호출/짧은 반환·hook 경로가 있으면 범용 arbitrary-RW·ORW·gadget 체인보다 우선하고, heap이라는 이유만으로 Deep에 들어가지 마라. 같은 분석을 반복하지 말고 solve.py를 가장 빨리 실행하며, writeup과 사전 checkpoint는 생략하라.
 $docker_benchmark_rule
 $common_execution
 EOF
@@ -681,6 +747,12 @@ run_variant() {
   local stderr_file="$run_root/metrics/$key.stderr.log"
   local status_file="$run_root/metrics/$key.status"
   local isolated_codex_home="$benchmark_codex_home_root/$key"
+  local variant_home=$HOME
+  local variant_xdg_config=${XDG_CONFIG_HOME:-$HOME/.config}
+  local variant_xdg_cache=${XDG_CACHE_HOME:-$HOME/.cache}
+  local variant_xdg_data=${XDG_DATA_HOME:-$HOME/.local/share}
+  local selected_docker_runner="$common_docker_runner"
+  local selected_remote_harness="$common_remote_harness"
   local fifo_dir fifo_file
   local started_ns ended_ns duration_ms codex_status capture_status codex_pid
   local -a capture_options=(--label "$label" --output "$events_file")
@@ -699,8 +771,18 @@ run_variant() {
     feature_args+=(--disable skill_search)
   fi
 
+  if [[ "$key" == plain ]]; then
+    selected_docker_runner="$plain_docker_runner"
+    selected_remote_harness="$plain_remote_harness"
+    variant_home="$benchmark_codex_home_root/plain-user-home"
+    variant_xdg_config="$variant_home/.config"
+    variant_xdg_cache="$variant_home/.cache"
+    variant_xdg_data="$variant_home/.local/share"
+    mkdir -p "$variant_xdg_config" "$variant_xdg_cache" "$variant_xdg_data"
+  fi
+
   if [[ "$category" == pwn ]]; then
-    runtime_env+=("CTF_PWN_RUNNER=$common_docker_runner")
+    runtime_env+=("CTF_PWN_RUNNER=$selected_docker_runner")
     [[ -z "$docker_image" ]] || runtime_env+=("CTF_PWN_IMAGE=$docker_image")
   fi
 
@@ -743,16 +825,18 @@ run_variant() {
   mkfifo -- "$fifo_file"
   set +e
   "${launch_prefix[@]}" \
-    env CODEX_HOME="$isolated_codex_home" \
+    env HOME="$variant_home" CODEX_HOME="$isolated_codex_home" \
+      XDG_CONFIG_HOME="$variant_xdg_config" XDG_CACHE_HOME="$variant_xdg_cache" \
+      XDG_DATA_HOME="$variant_xdg_data" \
       MALLOC_ARENA_MAX=2 NODE_OPTIONS="--max-old-space-size=$((memory_max_mb - 256))" \
       CTF_AGENT_ROOT="$workspace" CTF_BENCH_WORK_DIR="$work_dir" \
       CTF_BENCH_CATEGORY="$category" \
       CTF_PWN_BENCHMARK="$([[ "$category" == pwn ]] && printf true || printf false)" \
       CTF_BENCH_DOCKER_IMAGE="$docker_image" CTF_BENCH_REMOTE="$remote_enabled" \
-      CTF_BENCH_DOCKER_RUNNER="$common_docker_runner" \
+      CTF_BENCH_DOCKER_RUNNER="$selected_docker_runner" \
       CTF_BENCH_RUN_ID="$run_id" CTF_BENCH_VARIANT="$key" \
       CTF_REMOTE_HOST="$remote_host" CTF_REMOTE_PORT="$remote_port" \
-      CTF_REMOTE_HARNESS="$common_remote_harness" \
+      CTF_REMOTE_HARNESS="$selected_remote_harness" \
       CTF_REMOTE_TRANSCRIPT="$work_dir/remote-transcript.txt" \
       "${runtime_env[@]}" \
     "$codex_bin" exec --ephemeral --ignore-user-config --skip-git-repo-check \
@@ -788,6 +872,14 @@ run_variant() {
     printf 'remote_mode=%s\n' "$remote_enabled"
     printf 'flag_short_circuit=%s\n' "$([[ "$capture_status" -eq 10 ]] && printf true || printf false)"
   } > "$status_file"
+
+  if [[ "$key" == plain ]]; then
+    [[ "$workspace" == "$plain_root" ]] || { echo 'plain 격리 작업공간 경로 불일치' >&2; return 76; }
+    [[ ! -e "$plain_archive_root" ]] || { echo 'plain 결과 보관 경로가 이미 존재합니다.' >&2; return 76; }
+    mv -- "$workspace" "$plain_archive_root"
+    workspace="$plain_archive_root"
+    work_dir="$plain_archive_root/work"
+  fi
 
   python3 "$metrics_py" summarize \
     --key "$key" --label "$label" --events "$events_file" --status "$status_file" \

@@ -1,6 +1,8 @@
 # Pwn feedback index
 
 - `complex-target-fast-path.md`: layered runner/transport failures, payload-size pivots, evidence-ranked hypotheses, and deterministic final-effect selection
+- `qemu-session-lifecycle.md`: serial transport framing, remote-mode contracts, QEMU service collisions, and owned-resource cleanup
+- `page-table-reclaim.md`: evidence-driven UAF reclamation, KASLR leak validation, PTE replacement, and safe final-effect selection
 
 Fast Probe 중에는 이 색인만 확인한다. 증상이나 실패 유형이 일치할 때 관련 문서만 읽는다.
 

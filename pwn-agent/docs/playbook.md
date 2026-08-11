@@ -17,6 +17,7 @@ Solve independently from challenge inputs, prepared runtime files, local analysi
 1. Run `pwn-triage.sh` once to collect file type, mitigations, symbols, imports, and `main` disassembly.
 2. Prefer supplied source and the exact Dockerfile environment. Reuse `ctf-<challenge>:local`; rebuild only when requested or absent.
 3. Reproduce with `pwn-run.sh`, using its prepared runtime-bundle mode when `runtime_status=ready`; it fixes interactive stdin, explicit loader/libc selection, runtime network isolation, limits, and timeouts.
+   Never run `pwn-run.sh IMAGE` directly to inspect an image: the default CMD may be an indefinite QEMU/service. Use an explicit terminating command for a probe. When the solver must drive the default service, call `pwn-run.sh --service --timeout <seconds> IMAGE`; keep exactly one such local service active per variant and close it on every success/failure path. The harness adds a short KILL grace and removes only its CID-owned container after timeout, allowing the Agent session to continue.
 4. Build one primitive at a time and attempt at most two candidate exploits before Deep escalation.
 5. Avoid GDB until two cheaper tests fail or the exact offset/state remains genuinely ambiguous.
 6. Read `work/intake-exec.txt`. If Docker COPY destinations and service executable references differ, determine the actual entrypoint before treating a local success or failure as representative of the official service.
