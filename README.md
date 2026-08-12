@@ -6,12 +6,13 @@ Codex CLI에서 로컬 CTF 문제를 분야별 에이전트와 재현 가능한 
 
 - `ctf-pwn`: pwn 문제 복사, Adaptive Fast→Deep 풀이, Docker 또는 STATIC-ONLY 실행
 - pwn 문제의 제공 `libc`·`ld`를 우선 적용하고, 부족할 때만 정확한 Docker 이미지에서 검증된 한 쌍 추출
-- `ctf-rev`: 리버싱 문제 복사, Adaptive Fast→Deep 분석, 격리 실행 강제
+- `ctf-rev`: 리버싱 문제 복사, 전체 동작 분석보다 최단 플래그 추출을 우선하는 Adaptive Fast→Deep 분석, 격리 실행 강제
+- rev Fast Probe는 `rev-fast-probe.sh`로 인테이크 경로와 최초 출력량을 고정하며, 큰 blob 전체가 아닌 참조된 offset 주변만 분석
 - `ctf-learn`: 완료된 풀이에서 검증된 재사용 교훈만 분야별 피드백에 축적
 - `ctf-clean`: 학습·풀이 결과를 보존하면서 중복 입력, 실행 로그와 재생성 캐시 정리
 - 복합 pwn 문제의 최근 20단계 체크포인트와 1MiB 원격 transcript 상한
 - `ctf-pwn`은 기본적으로 `gpt-5.6-sol` + `high` 추론을 사용하며, `--deep`에서만 `ultra`로 전환; 모든 모드에서 `fast` 서비스 티어와 Fast mode 활성화
-- `ctf-rev` 문제 풀이는 기본적으로 `gpt-5.6-sol` + `ultra` 추론 사용
+- `ctf-rev`는 기본적으로 `gpt-5.6-sol` + `high` 추론을 사용하며, `--deep`에서만 `ultra`로 전환; 모든 모드에서 `fast` 서비스 티어와 Fast mode 활성화
 - `ctf-export`: 원본을 수정하지 않고 GitHub 공개용 복사본과 로컬 커밋 생성
 - pwn, reverse engineering, web, crypto, forensics/misc 라우팅
 - 신뢰할 수 없는 실행 파일의 호스트 실행 금지와 Docker 네트워크 격리
@@ -34,17 +35,24 @@ export CTF_PWNABLE_SOURCE=/path/to/pwnable
 
 ```bash
 ctf-pwn challenge-name
+ctf-pwn --extra-prompt challenge-name
 ctf-pwn --fast-only challenge-name
 ctf-pwn --deep challenge-name
 ctf-pwn --keep-docker challenge-name
 ctf-pwn challenge-name host.example:31337
 ctf-pwn challenge-name host.example 31337
 ctf-rev --source /path/to/reversing challenge-name
+ctf-rev --extra-prompt challenge-name
+ctf-rev --fast-only --source /path/to/reversing challenge-name
+ctf-rev --deep --source /path/to/reversing challenge-name
+ctf-rev --prepare-only --source /path/to/reversing challenge-name
 ctf-web --source /path/to/web challenge-name
 ctf-web --source /path/to/web --port 8080 challenge-name
 ctf-bench-pwn --source /path/to/pwn challenge-name
+ctf-bench-pwn --extra-prompt challenge-name host.example:31337
 ctf-bench-pwn --remote host.example:31337 challenge-name
 ctf-bench-rev --source /path/to/rev challenge-name
+ctf-bench-rev --extra-prompt challenge-name
 ctf-bench-web --source /path/to/web challenge-name
 ctf-bench-crypto --source /path/to/crypto challenge-name
 ctf-bench-forensics --source /path/to/forensics challenge-name
@@ -52,6 +60,8 @@ ctf-learn challenge-name
 ctf-clean
 ctf-clean --caches --apply
 ```
+
+`ctf-pwn`, `ctf-rev`, `ctf-bench-pwn`, `ctf-bench-rev`에 `--extra-prompt`를 지정하면 실제 실행 직전에 추가 지시 한 줄을 입력받습니다. Enter만 누르면 추가 없이 계속합니다. 벤치마크에서는 같은 문장을 plain과 FAST_LOCAL 양쪽에 동일하게 전달하고 실행별 prompt 파일에도 보존합니다. 자동화에서는 `CTF_EXTRA_PROMPT='추가 지시'` 환경 변수를 사용할 수 있습니다. 추가 지시는 기존 CTF 범위·격리·안전 규칙을 완화할 수 없습니다.
 
 ## 벤치마크
 
@@ -78,7 +88,9 @@ Pwn 벤치는 현재 `ctf-pwn`과 같은 런타임 준비 과정을 먼저 수�
 
 결과는 `benchmarks/runs/<category>/<run-id>/report.md`와 각 실행의 JSONL 이벤트에 남습니다. 기본 제한 시간은 `0`, 즉 풀이 중 자동 종료 없음이며 사용자가 `--timeout`을 준 경우만 제한합니다. 원격 플래그 시각은 즉시 성공 시각으로 고정하고 추가 도구 실행을 허용하지 않지만, 정확한 토큰 비교를 위해 기본적으로 최종 `turn.completed.usage`만 최대 45초 기다립니다. usage가 오지 않으면 토큰을 거짓 `0` 대신 `미집계`로 표시합니다. 플래그 포착 즉시 프로세스를 끝내려면 `--no-exact-tokens`를 사용합니다. `ctf-bench-pwn --dry-run challenge-name`처럼 모델 호출 없이 분야·설정·범위를 먼저 확인할 수 있습니다.
 
-리버싱 문제의 기본 원본 경로는 `$HOME/ctf-challenges/reversing`입니다. 다른 위치는 `--source` 또는 `CTF_REV_SOURCE`로 지정합니다. 제공된 Dockerfile이 없으면 바이너리를 호스트에서 실행하지 않는 STATIC-ONLY 분석으로 진행합니다.
+`ctf-rev`는 입력을 복사한 뒤 실행 없이 형식·아키텍처·런타임 후보를 `work/intake-exec.txt`에 기록하고, 가장 짧은 복원 경로를 `work/recover.py`에 구현합니다. 제공된 Dockerfile은 Codex 시작 전에 한 번 빌드하며, rev 전용 runner가 입력을 `/ctf-input`에 읽기 전용으로 마운트하여 네트워크가 차단된 일회용 컨테이너에서만 동적 검증합니다. Dockerfile과 정확한 캐시 이미지가 없거나 빌드가 실패하면 호스트 실행 없이 STATIC-ONLY로 계속합니다. 기본 원본 경로는 `$HOME/ctf-challenges/rev`이며 다른 위치는 `--source` 또는 `CTF_REV_SOURCE`로 지정합니다. 검증된 flag는 문서 작업보다 먼저 출력하고 즉시 종료합니다.
+
+`ctf-bench-rev`는 plain Codex와 FAST_LOCAL을 `gpt-5.6-sol`, `xhigh`, fast service tier로 병렬 실행합니다. plain에는 문제 파일과 동일한 격리 실행 수단만 제공하고 Agent·스킬·피드백은 차단합니다. FAST_LOCAL에는 실제 `ctf-rev`의 루트 `AGENTS.md`, `$ctf-rev` 스킬, rev 피드백, intake와 복원기 골격을 제공합니다. Dockerfile은 한 번만 빌드하여 두 변형이 같은 불변 이미지를 공유하되, 실행 컨테이너와 작업공간은 서로 분리합니다. 두 실행 모두 기본 `MemoryHigh=1536MiB`, `MemoryMax=2048MiB` 제한을 적용하며 검증된 flag와 `.solved`를 성공 기준으로 동일하게 비교합니다.
 
 `ctf-web`은 제공된 Compose 파일(`compose.yaml`, `compose.yml`, `docker-compose.yml`, `docker-compose.yaml`)을 가장 먼저 사용하고, 없으면 `Dockerfile`을 빌드해 Web 서비스를 Codex보다 먼저 시작합니다. Compose는 disposable 소스 복사본에서 실행하며, 포트를 `127.0.0.1`의 임의 포트로 다시 묶고 runtime Docker 네트워크를 internal로 바꿉니다. privileged/host namespace/device/external network 및 작업 복사본 밖 bind mount는 거부합니다. 실행 origin은 `work/web-runtime.env`와 `CTF_WEB_BASE_URL`에 기록되고, Codex는 이 origin에만 HTTP 요청을 보냅니다. Dockerfile에 `EXPOSE`가 없으면 `--port`로 컨테이너 포트를 지정합니다. 종료 시 해당 Compose 프로젝트·볼륨·로컬 이미지 또는 단일 컨테이너·네트워크·이미지만 정리하며 `--keep-docker`로 보존할 수 있습니다.
 
@@ -90,7 +102,7 @@ ctf-web --deep --keep-docker --source /path/to/web challenge-name
 
 `ctf-pwn`은 기본적으로 `gpt-5.6-sol`, Adaptive/Fast의 추론 강도 `high`, Deep의 추론 강도 `ultra`를 사용합니다. 모든 모드에 `service_tier="fast"`와 `fast_mode`를 명시적으로 적용합니다. 일시적으로 변경해야 할 때만 `CTF_CODEX_MODEL`, `CTF_CODEX_REASONING_EFFORT`, `CTF_CODEX_SERVICE_TIER` 환경 변수를 지정합니다.
 
-`ctf-clean`은 기본적으로 미리보기만 수행합니다. `--apply`를 지정해도 `ctf-learn` 피드백, `work/solve.py`, `work/writeup.md`, `evidence/private`, `scope`는 항상 보존합니다. 문제의 `input/`은 풀이가 완료됐고 외부 원본 경로가 실제로 확인될 때만 삭제합니다. `--caches`는 다시 내려받거나 생성할 수 있는 Go 빌드, pip, uv 캐시만 추가로 정리하며 설치된 도구와 라이브러리는 제거하지 않습니다.
+`ctf-clean`은 기본적으로 미리보기만 수행합니다. `--apply`를 지정해도 `ctf-learn` 피드백, `work/solve.py`, `work/recover.py`, `work/writeup.md`, `evidence/private`, `scope`는 항상 보존합니다. 문제의 `input/`은 풀이가 완료됐고 외부 원본 경로가 실제로 확인될 때만 삭제합니다. `--caches`는 다시 내려받거나 생성할 수 있는 Go 빌드, pip, uv 캐시만 추가로 정리하며 설치된 도구와 라이브러리는 제거하지 않습니다.
 
 WSL 내부 파일을 삭제해도 `ext4.vhdx`의 Windows 실제 크기가 줄지 않으면 관리자 PowerShell에서 다음 스크립트를 실행합니다. 정확한 배포판 VHDX를 검증하고 WSL을 정상 종료한 뒤 빈 블록만 압축하며, 위험한 sparse 옵션은 사용하지 않습니다.
 

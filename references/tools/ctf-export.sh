@@ -214,11 +214,28 @@ cp -- "$source_real/references/export/gitignore.public" "$output_real/.gitignore
 
 pwn_launcher="$output_real/references/tools/ctf-pwn-start.sh"
 web_launcher="$output_real/references/tools/ctf-web-start.sh"
+rev_launcher="$output_real/references/tools/ctf-rev-start.sh"
 bench_launcher="$output_real/references/tools/ctf-bench.sh"
+public_readme="$output_real/README.md"
 sed -i 's|^source_root=${CTF_PWNABLE_SOURCE:-.*}$|source_root=${CTF_PWNABLE_SOURCE:-$HOME/ctf-challenges/pwnable}|' "$pwn_launcher"
 sed -i 's|^source_root=${CTF_WEB_SOURCE:-.*}$|source_root=${CTF_WEB_SOURCE:-$HOME/ctf-challenges/web}|' "$web_launcher"
-sed -i 's|^  pwn) source_root=${CTF_PWNABLE_SOURCE:-.*} ;;$|  pwn) source_root=${CTF_PWNABLE_SOURCE:-$HOME/ctf-challenges/pwnable} ;;/|' "$bench_launcher"
-sed -i 's|^  web) source_root=${CTF_WEB_SOURCE:-.*} ;;$|  web) source_root=${CTF_WEB_SOURCE:-$HOME/ctf-challenges/web} ;;/|' "$bench_launcher"
+sed -i 's|^source_root=${CTF_REV_SOURCE:-.*}$|source_root=${CTF_REV_SOURCE:-$HOME/ctf-challenges/rev}|' "$rev_launcher"
+sed -i 's|^  pwn) source_root=${CTF_PWNABLE_SOURCE:-.*} ;;$|  pwn) source_root=${CTF_PWNABLE_SOURCE:-$HOME/ctf-challenges/pwnable} ;;|' "$bench_launcher"
+sed -i 's|^  rev) source_root=${CTF_REV_SOURCE:-.*} ;;$|  rev) source_root=${CTF_REV_SOURCE:-$HOME/ctf-challenges/rev} ;;|' "$bench_launcher"
+sed -i 's|^  web) source_root=${CTF_WEB_SOURCE:-.*} ;;$|  web) source_root=${CTF_WEB_SOURCE:-$HOME/ctf-challenges/web} ;;|' "$bench_launcher"
+
+# Help text and README prose can contain the same machine-local defaults even
+# after the executable assignment is normalized. Rewrite only the known CTF
+# source roots; an unexpected personal path remains a blocking scan finding.
+public_unix_desktop_pattern='/mnt/c/'"Users/[^/]+/OneDrive/Desktop"
+public_home='$HOME'
+for public_text in "$pwn_launcher" "$web_launcher" "$rev_launcher" "$bench_launcher" "$public_readme"; do
+  sed -i -E \
+    -e "s|$public_unix_desktop_pattern/pwnable|$public_home/ctf-challenges/pwnable|g" \
+    -e "s|$public_unix_desktop_pattern/rev|$public_home/ctf-challenges/rev|g" \
+    -e "s|$public_unix_desktop_pattern/web|$public_home/ctf-challenges/web|g" \
+    "$public_text"
+done
 
 scan_output="$output_real/.ctf-export-scan.txt"
 unix_user_pattern='/mnt/c/'"Users/"

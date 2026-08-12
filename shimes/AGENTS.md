@@ -19,7 +19,7 @@ When a launcher already selected a category, its specialist skill is the single 
 3. Never execute an untrusted artifact outside `sandbox/`. Prefer offline inspection first.
 4. Route work through the phase owners below. A phase may be repeated when evidence changes.
 
-Adaptive mode is the default for every category: P0-Lite, fixed routing when the launcher already knows the category, a bounded specialist Fast Probe, P5-Lite, and automatic in-place escalation to the full P0-P6 workflow only when a defined trigger fires. `ctf-pwn <challenge-name>` and `ctf-web <challenge-name>` implement this for local pwn and Web intake. `--fast-only` disables escalation; `--deep` starts full P0-P6; `--audit` adds observability without changing solve rigor.
+Adaptive mode is the default for every category: P0-Lite, fixed routing when the launcher already knows the category, a bounded specialist Fast Probe, P5-Lite, and automatic in-place escalation to the full P0-P6 workflow only when a defined trigger fires. `ctf-pwn <challenge-name>`, `ctf-rev <challenge-name>`, and `ctf-web <challenge-name>` implement this for local pwn, reversing, and Web intake. `--fast-only` disables escalation; `--deep` starts full P0-P6; `--audit` adds observability without changing solve rigor.
 
 ## Adaptive execution
 
@@ -31,6 +31,7 @@ Adaptive mode is the default for every category: P0-Lite, fixed routing when the
 - Escalate without restarting when source is absent, the target is stripped/obfuscated, race/probabilistic behavior appears, environment/protocol remains uncertain, local and official behavior differs, two evidence-bearing exploit trials fail, or the fast budget expires. Heap usage alone is not an escalation trigger when a direct primitive and short flag path are already concrete.
 - Reuse Fast results in Deep mode; never repeat completed discovery only to satisfy phase formatting.
 - For pwn, route all runtime, offline solving, fast-to-remote, and completion details to `pwn-agent/skills/SKILL.md`; do not restate or expand them during startup.
+- For reversing, route static mapping, sandboxed execution, recovery, verification, and completion details to `rev-agent/skills/SKILL.md`. Do not preload its longer docs or feedback index.
 - For Web challenges, inspect and start a supplied Compose file before a standalone Dockerfile. Run a disposable source copy, rebind published ports to loopback, make runtime networks internal, reject unsafe host/device/privileged access, and record the origin in `work/web-runtime.env` before HTTP traffic.
 
 ## Shared execution environment

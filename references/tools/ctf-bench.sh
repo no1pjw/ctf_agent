@@ -28,6 +28,7 @@ pwn 기본 조작법:
   --remote HOST:PORT  pwn 전용 허가 원격 엔드포인트(정확히 이 주소만 허용)
   --exact-tokens      최종 usage 대기(기본값이며 이전 버전 호환 옵션)
   --no-exact-tokens   플래그 즉시 종료를 우선하고 미도착 토큰은 미집계
+  --extra-prompt      시작 직전에 두 변형에 공통으로 넣을 추가 지시 한 줄 입력
   --order ORDER       이전 버전 호환 옵션이며 병렬 모드에서는 무시
   --dry-run           실행 경로와 고정 설정만 확인
   -h, --help          도움말
@@ -37,7 +38,7 @@ pwn 기본 조작법:
   reasoning effort    xhigh
   service tier        fast
   subagents           disabled
-  automatic skills    plain disabled; FAST_LOCAL explicitly uses ctf-pwn
+  automatic skills    plain disabled; FAST_LOCAL uses the selected category skill
   Codex mode          exec --ephemeral --ignore-user-config
 
 환경 변수:
@@ -53,6 +54,7 @@ pwn 기본 조작법:
   CTF_BENCH_MEMORY_MAX_MB  실행별 최대 메모리(기본 2048)
   CTF_BENCH_MIN_HOST_FREE_MB 시작에 필요한 Windows 여유 공간(기본 61440)
   CTF_BENCH_TRIM_INTERVAL_SECONDS 실행 중 fstrim 간격(기본 120, 0=비활성)
+  CTF_EXTRA_PROMPT    대화형 입력 없이 두 변형에 공통으로 추가할 프롬프트
 EOF
 }
 
@@ -62,6 +64,8 @@ run_order=plain-first
 remote_endpoint=
 dry_run=false
 exact_tokens=true
+ask_extra_prompt=false
+extra_prompt=${CTF_EXTRA_PROMPT:-}
 usage_grace_seconds=${CTF_BENCH_USAGE_GRACE_SECONDS:-45}
 memory_high_mb=${CTF_BENCH_MEMORY_HIGH_MB:-1536}
 memory_max_mb=${CTF_BENCH_MEMORY_MAX_MB:-2048}
@@ -88,6 +92,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     --exact-tokens) exact_tokens=true ;;
     --no-exact-tokens) exact_tokens=false ;;
+    --extra-prompt) ask_extra_prompt=true ;;
     --order)
       [[ $# -ge 2 ]] || { echo '--order에는 plain-first 또는 fast-first가 필요합니다.' >&2; exit 64; }
       run_order=$2
@@ -152,14 +157,15 @@ script_dir="$(cd -- "$(dirname -- "$script_path")" && pwd)"
 default_agent_root="$(cd -- "$script_dir/../.." && pwd)"
 agent_root=${CTF_AGENT_ROOT:-$default_agent_root}
 case "$category" in
-  pwn) source_root=${CTF_PWNABLE_SOURCE:-$HOME/ctf-challenges/pwnable} ;;/
-  rev) source_root=${CTF_REV_SOURCE:-$HOME/ctf-challenges/reversing} ;;
-  web) source_root=${CTF_WEB_SOURCE:-$HOME/ctf-challenges/web} ;;/
+  pwn) source_root=${CTF_PWNABLE_SOURCE:-$HOME/ctf-challenges/pwnable} ;;
+  rev) source_root=${CTF_REV_SOURCE:-$HOME/ctf-challenges/rev} ;;
+  web) source_root=${CTF_WEB_SOURCE:-$HOME/ctf-challenges/web} ;;
   crypto) source_root=${CTF_CRYPTO_SOURCE:-$HOME/ctf-challenges/crypto} ;;
   forensics) source_root=${CTF_FORENSICS_SOURCE:-$HOME/ctf-challenges/forensics} ;;
 esac
 bench_root=${CTF_BENCH_ROOT:-$agent_root/benchmarks}
 metrics_py="$script_dir/ctf-bench-metrics.py"
+extra_prompt_tool="$script_dir/ctf-extra-prompt.sh"
 codex_bin=${CODEX_BIN:-}
 source_codex_home=${CODEX_HOME:-$HOME/.codex}
 model=gpt-5.6-sol
@@ -176,14 +182,23 @@ fi
 [[ -d "$agent_root" ]] || { printf 'CTF Agent 루트가 없습니다: %s\n' "$agent_root" >&2; exit 66; }
 [[ -e "$source_path" ]] || { printf '문제 원본을 찾을 수 없습니다: %s\n' "$source_path" >&2; exit 67; }
 [[ -f "$metrics_py" ]] || { printf '벤치마크 집계기가 없습니다: %s\n' "$metrics_py" >&2; exit 66; }
+[[ -x "$extra_prompt_tool" ]] || { printf '공통 추가 프롬프트 도구가 없습니다: %s\n' "$extra_prompt_tool" >&2; exit 66; }
 if [[ "$category" == pwn ]]; then
   [[ -f "$agent_root/references/tools/pwntools-template.py" ]] || { echo 'pwntools solver 템플릿이 없습니다.' >&2; exit 66; }
+elif [[ "$category" == rev ]]; then
+  [[ -x "$agent_root/references/tools/rev-intake-check.sh" ]] || { echo 'rev intake 도구가 없습니다.' >&2; exit 66; }
+  [[ -x "$agent_root/references/tools/rev-run.sh" ]] || { echo 'rev Docker runner가 없습니다.' >&2; exit 66; }
+  [[ -f "$agent_root/references/tools/rev-recover-template.py" ]] || { echo 'rev 복원기 템플릿이 없습니다.' >&2; exit 66; }
 fi
 
 if [[ -z "$codex_bin" && -x "$HOME/.local/bin/codex" ]]; then
   codex_bin="$HOME/.local/bin/codex"
 elif [[ -z "$codex_bin" ]]; then
   codex_bin="$(command -v codex 2>/dev/null || true)"
+fi
+
+if [[ "$ask_extra_prompt" == true ]]; then
+  extra_prompt=$("$extra_prompt_tool" --interactive)
 fi
 
 if [[ "$dry_run" == true ]]; then
@@ -195,6 +210,8 @@ if [[ "$dry_run" == true ]]; then
   if [[ "$remote_enabled" == true ]]; then
     printf '원격 엔드포인트:  %s:%s (이 주소만 허용)\n' "$remote_host" "$remote_port"
     printf '성공 판정:        원격 하니스 플래그 포착 즉시 성공 및 종료\n'
+  elif [[ "$category" == rev ]]; then
+    printf '성공 판정:        독립 복원 또는 격리 검증 + .solved=verified\n'
   else
     printf '성공 판정:        로컬 clean replay + .solved=verified\n'
   fi
@@ -210,15 +227,16 @@ if [[ "$dry_run" == true ]]; then
   printf '서비스 등급:      fast (fast_mode)\n'
   printf '웹 탐색:          비활성화\n'
   printf '서브에이전트:     비활성화(features.multi_agent=false)\n'
-  printf '스킬 구성:        Plain 비활성 / FAST_LOCAL ctf-pwn 활성\n'
+  printf '스킬 구성:        Plain 비활성 / FAST_LOCAL ctf-%s 활성\n' "$category"
   printf 'Plain 구성:       문제 파일만 제공, Agent/스킬 없음\n'
-  printf 'FAST_LOCAL 구성:  ctf-pwn 오케스트레이터·스킬·피드백 사용\n'
+  printf 'FAST_LOCAL 구성:  ctf-%s 오케스트레이터·스킬·피드백 사용\n' "$category"
   printf 'Docker 구성:      이미지 1회 준비·공유, variant별 독립 --rm 컨테이너\n'
   printf 'Docker 캐시:      문제별 공용 이미지 1개 유지, 이전 교체본과 실행 컨테이너 정리\n'
   printf '실행별 메모리:    high=%sMiB max=%sMiB\n' "$memory_high_mb" "$memory_max_mb"
   printf '저장공간 보호:    시작 여유 %sMiB, 실행 중 trim 간격 %s초\n' "$min_host_free_mb" "$trim_interval_seconds"
   printf '세션 저장:        비활성화(--ephemeral)\n'
   printf '토큰 집계:        %s\n' "$([[ "$exact_tokens" == true ]] && printf '최종 usage 대기(최대 %s초)' "$usage_grace_seconds" || printf '즉시 종료; usage 미도착 시 미집계')"
+  printf '추가 프롬프트:    %s\n' "$([[ -n "$extra_prompt" ]] && printf '지정됨(두 변형 동일 적용)' || printf '없음')"
   exit 0
 fi
 
@@ -264,10 +282,10 @@ fast_input="$fast_challenge/input"
 fast_work="$fast_challenge/work"
 common_tools="$run_root/tools"
 common_remote_harness="$common_tools/pwn-remote-run.sh"
-common_docker_runner="$common_tools/pwn-run.sh"
+common_docker_runner="$common_tools/$category-run.sh"
 plain_tools="$plain_root/tools"
 plain_remote_harness="$plain_tools/pwn-remote-run.sh"
-plain_docker_runner="$plain_tools/pwn-run.sh"
+plain_docker_runner="$plain_tools/$category-run.sh"
 image_slug=$(printf '%s' "$challenge_name" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9._-]/-/g')
 shared_image="ctf-bench-cache-$category-$image_slug:local"
 shared_image_ready=false
@@ -298,7 +316,7 @@ cleanup_benchmark_codex_homes() {
 }
 
 trim_wsl_free_blocks() {
-  [[ "$category" == pwn ]] || return 0
+  [[ "$category" == pwn || "$category" == rev ]] || return 0
   [[ ${CTF_BENCH_AUTO_TRIM:-true} == true ]] || return 0
   [[ -x /usr/sbin/fstrim ]] || return 0
   command -v sudo >/dev/null 2>&1 || return 0
@@ -311,7 +329,7 @@ trim_wsl_free_blocks() {
 }
 
 start_trim_watchdog() {
-  [[ "$category" == pwn ]] || return 0
+  [[ "$category" == pwn || "$category" == rev ]] || return 0
   (( trim_interval_seconds > 0 )) || return 0
   [[ -x /usr/sbin/fstrim ]] || return 0
   command -v sudo >/dev/null 2>&1 || return 0
@@ -500,6 +518,23 @@ if [[ "$category" == pwn ]]; then
   prepare_pwn_runtime "$fast_input" "$fast_work" "$shared_image" "$shared_image_ready" "$run_root/metrics/fast_local.runtime.log"
   CTF_AGENT_ROOT="$fast_root" "$agent_root/references/tools/pwn-checkpoint.sh" \
     "$challenge_name" setup active 'mode=adaptive benchmark=ctf-pwn' >/dev/null 2>&1 || true
+elif [[ "$category" == rev ]]; then
+  # Build the supplied image once. Plain and FAST_LOCAL receive the same image,
+  # but each dynamic probe runs in its own disposable, network-disabled container.
+  cp -a -- "$agent_root/references/tools/rev-run.sh" "$common_docker_runner"
+  cp -a -- "$agent_root/references/tools/rev-run.sh" "$plain_docker_runner"
+  cp -a -- "$agent_root/references/tools/rev-fast-probe.sh" "$run_root/tools/rev-fast-probe.sh"
+  chmod +x "$common_docker_runner" "$plain_docker_runner" "$run_root/tools/rev-fast-probe.sh"
+  if [[ -f "$fast_input/Dockerfile" ]]; then
+    command -v docker >/dev/null 2>&1 || { echo 'Dockerfile이 있는 rev 벤치에는 Docker CLI가 필요합니다.' >&2; exit 69; }
+    prepare_shared_image "$fast_input" "$run_root/metrics/shared-image.log" || true
+  fi
+  "$agent_root/references/tools/rev-intake-check.sh" "$fast_input" > "$fast_work/intake-exec.txt"
+  cp -a -- "$agent_root/references/tools/rev-recover-template.py" "$fast_work/recover.py"
+  # The skill uses stable short paths. Point them at the canonical challenge
+  # directories so it never spends turns discovering launcher-created files.
+  ln -sfn "challenges/$challenge_name/input" "$fast_root/input"
+  ln -sfn "challenges/$challenge_name/work" "$fast_root/work"
 else
   # Build once from the identical supplied context. Both variants receive the
   # same immutable image and create independent disposable containers from it.
@@ -517,6 +552,12 @@ if [[ "$category" == pwn ]]; then
     docker_benchmark_rule="- 로컬 실행은 공용 읽기 전용 이미지 $shared_image와 \"\$CTF_BENCH_DOCKER_RUNNER\"를 사용하라. plain과 FAST_LOCAL은 같은 이미지를 쓰지만 매 호출마다 서로 독립된 --rm 컨테이너를 생성한다. 이미지를 다시 빌드·태그·삭제하거나 상대 variant의 컨테이너를 재사용하지 마라. bare IMAGE 호출은 금지한다. 검사는 종료되는 명시적 COMMAND를 사용하고, 이미지 기본 QEMU/service CMD가 필요할 때만 solver 내부에서 --service로 실행해 I/O와 종료를 직접 소유하라."
   else
     docker_benchmark_rule='- 준비된 공용 Docker 이미지가 없다. Docker를 재시도하거나 문제 바이너리를 호스트에서 실행하지 말고 STATIC-ONLY 분석을 계속하라.'
+  fi
+elif [[ "$category" == rev ]]; then
+  if [[ "$shared_image_ready" == true ]]; then
+    docker_benchmark_rule="- 동적 검증은 공용 읽기 전용 이미지 $shared_image와 \"\$CTF_BENCH_DOCKER_RUNNER\"를 사용하라. 두 변형은 같은 이미지를 사용하지만 매 호출마다 서로 독립된 --rm 컨테이너를 생성한다. 이미지를 다시 빌드·삭제하거나 bare IMAGE를 실행하지 말고, 종료되는 명시적 COMMAND만 사용하라."
+  else
+    docker_benchmark_rule='- 준비된 Docker 이미지가 없으므로 STATIC-ONLY로 분석하라. 문제 파일을 호스트에서 실행하거나 임의의 런타임을 내려받지 마라.'
   fi
 else
   docker_benchmark_rule=
@@ -585,7 +626,28 @@ EOF
     ;;
   rev)
     ln -s "$agent_root/rev-agent" "$fast_root/rev-agent"
-    category_fast_rules='Use the reversing Fast Probe: static map first, one ranked hypothesis at a time, and isolated Docker execution only when needed. Produce the smallest recover.py or solver and verify the derived flag.'
+    mkdir -p "$benchmark_codex_home_root/fast_local/skills"
+    ln -s "$agent_root/rev-agent/skills" "$benchmark_codex_home_root/fast_local/skills/ctf-rev"
+    category_fast_rules=$(cat <<'EOF'
+The ctf-rev skill is already injected: never cat SKILL.md. Read
+work/intake-exec.txt directly and do not search for it. Run
+"$CTF_REV_FAST_PROBE" "$CTF_REV_INPUT_DIR" exactly once for initial inspection.
+Treat the artifact as an answer-extraction
+target, not a whole-program-understanding assignment. In one combined probe,
+check strings/resources, success references, compare constants, and the nearest
+validator or decoder, with total output capped at 16 KiB. Test at most two
+cheapest direct flag hypotheses. Never dump or disassemble a whole raw blob;
+recover referenced offsets first and inspect only bounded windows. Inspect
+only the shortest suspected flag slice: do not enumerate all functions, build a
+complete CFG, or broadly decompile while a direct path remains viable. Create
+only the smallest useful recover.py. Execute challenge content only through the
+supplied network-disabled Docker runner. Stop widening the analysis as soon as a
+verified flag path is available. A recorded PREFIX{...} may wrap the program's
+raw accepted payload; try the verified wrapper before rejecting the equation.
+Read one matching feedback entry only after a
+concrete blocker; never preload the full feedback history.
+EOF
+)
     ;;
   web)
     ln -s "$agent_root/web-agent" "$fast_root/web-agent"
@@ -678,7 +740,7 @@ python3 -m py_compile <solver.py> && "\$CTF_REMOTE_HARNESS" --host "\$CTF_REMOTE
 EOF
 )
 else
-  if [[ "$category" == pwn && "$shared_image_ready" != true ]]; then
+  if [[ "$shared_image_ready" != true ]]; then
     common_execution='외부 네트워크에는 접속하지 마라. 공용 Docker 이미지가 없으므로 STATIC-ONLY로 분석하고 문제 바이너리를 호스트에서 실행하지 마라.'
   else
     common_execution='외부 네트워크에는 접속하지 말고, 문제 실행은 제공된 공용 Docker 이미지의 독립 컨테이너 안에서만 수행하라. 플래그를 검증하면 work/.solved에 verified를 기록하고 즉시 끝내라.'
@@ -707,6 +769,29 @@ $authorization_context
 $docker_benchmark_rule
 $common_execution
 EOF
+elif [[ "$category" == rev ]]; then
+  cat > "$run_root/plain.prompt.txt" <<EOF
+허가된 로컬 rev CTF 문제 '$challenge_name'을 문제 파일만 보고 바로 풀어라.
+입력은 input/이며 원본을 수정하지 마라. Agent·스킬·정책·피드백·writeup을 찾거나 읽지 마라.
+가장 짧은 검증 가능한 경로를 복원해 work/recover.py에 작성하라. 문제 파일은 호스트에서 실행하지 마라.
+$docker_benchmark_rule
+$common_execution
+검증된 flag를 FLAG=<value>로 먼저 출력하고 work/.solved에 verified를 기록한 뒤 즉시 끝내라.
+EOF
+  cat > "$run_root/fast-local.prompt.txt" <<EOF
+\$ctf-rev
+
+허가된 로컬 rev CTF 문제 '$challenge_name'을 ctf-rev와 같은 구조로 바로 풀어라.
+- 입력: challenges/$challenge_name/input
+- 시작: ctf-rev 스킬은 이미 주입되어 있다. SKILL.md를 다시 열거나 파일을 검색하지 말고 work/intake-exec.txt를 한 번 읽은 뒤 출력 16 KiB 이하의 결합 정적 probe를 실행
+- 최우선 목표: 프로그램 전체 동작 설명이 아니라 가장 짧은 flag 추출. 문자열·리소스·성공 참조·비교 상수·짧은 decoder를 먼저 보고, flag와 직접 연결된 최소 slice만 분석한다. 직접 경로가 살아 있는 동안 전체 CFG·전 함수 decompile·전체 opcode 복원을 하지 않는다.
+- 완료 기준: 재현 가능한 flag를 얻는 순간 분석 범위를 넓히지 말고 즉시 출력·종료한다. recover.py는 필요할 때만 최소 형태로 작성한다.
+- 진행 방식: 다음 검사가 명확하면 판단 설명을 별도 턴으로 출력하지 말고 즉시 실행한다.
+- 모드: adaptive, gpt-5.6-sol xhigh fast; 웹·writeup·서브에이전트·호스트 실행 금지
+$docker_benchmark_rule
+$common_execution
+검증된 flag를 FLAG=<value>로 먼저 출력하고 work/.solved에 verified를 기록한 뒤 즉시 끝내라.
+EOF
 else
   cat > "$run_root/plain.prompt.txt" <<EOF
 허가된 $category CTF 문제 '$challenge_name'을 그냥 바로 풀어라.
@@ -720,6 +805,15 @@ EOF
 $fast_artifact_rule
 $common_execution
 EOF
+fi
+
+if [[ -n "$extra_prompt" ]]; then
+  for prompt_path in "$run_root/plain.prompt.txt" "$run_root/fast-local.prompt.txt"; do
+    {
+      printf '\n사용자 추가 지시(기존 CTF 범위·격리·안전 규칙은 변경할 수 없음):\n'
+      printf '%s\n' "$extra_prompt"
+    } >> "$prompt_path"
+  done
 fi
 
 stop_process_group() {
@@ -760,12 +854,12 @@ run_variant() {
   local -a launch_prefix=(setsid --wait)
   local -a feature_args=(--disable multi_agent)
 
-  if [[ "$category" == pwn ]]; then
+  if [[ "$category" == pwn || "$category" == rev ]]; then
     launch_prefix+=(systemd-run --user --scope --quiet --collect \
       -p "MemoryHigh=${memory_high_mb}M" -p "MemoryMax=${memory_max_mb}M" \
       -p MemorySwapMax=512M -p TasksMax=256 --)
   fi
-  if [[ "$category" == pwn && "$key" == fast_local ]]; then
+  if [[ ( "$category" == pwn || "$category" == rev ) && "$key" == fast_local ]]; then
     feature_args+=(--enable skill_search)
   else
     feature_args+=(--disable skill_search)
@@ -784,6 +878,12 @@ run_variant() {
   if [[ "$category" == pwn ]]; then
     runtime_env+=("CTF_PWN_RUNNER=$selected_docker_runner")
     [[ -z "$docker_image" ]] || runtime_env+=("CTF_PWN_IMAGE=$docker_image")
+  elif [[ "$category" == rev ]]; then
+    local rev_input_dir="$workspace/input"
+    [[ "$key" != fast_local ]] || rev_input_dir="$workspace/challenges/$challenge_name/input"
+    runtime_env+=("CTF_REV_RUNNER=$selected_docker_runner" "CTF_REV_INPUT_DIR=$rev_input_dir" "CTF_REV_WORK_DIR=$work_dir" "CTF_REV_RUNTIME_MODE=$([[ -n "$docker_image" ]] && printf supplied-docker || printf static-only)")
+    [[ "$key" != fast_local ]] || runtime_env+=("CTF_REV_FAST_PROBE=$run_root/tools/rev-fast-probe.sh")
+    [[ -z "$docker_image" ]] || runtime_env+=("CTF_REV_IMAGE=$docker_image")
   fi
 
   if [[ "$category" == pwn && -f "$work_dir/runtime/runtime.env" ]]; then
@@ -832,6 +932,7 @@ run_variant() {
       CTF_AGENT_ROOT="$workspace" CTF_BENCH_WORK_DIR="$work_dir" \
       CTF_BENCH_CATEGORY="$category" \
       CTF_PWN_BENCHMARK="$([[ "$category" == pwn ]] && printf true || printf false)" \
+      CTF_REV_BENCHMARK="$([[ "$category" == rev ]] && printf true || printf false)" \
       CTF_BENCH_DOCKER_IMAGE="$docker_image" CTF_BENCH_REMOTE="$remote_enabled" \
       CTF_BENCH_DOCKER_RUNNER="$selected_docker_runner" \
       CTF_BENCH_RUN_ID="$run_id" CTF_BENCH_VARIANT="$key" \

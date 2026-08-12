@@ -26,9 +26,13 @@ chmod +x \
   "$target_dir/install-wsl.sh" \
   "$target_dir/references/tools/ctf-pwn-start.sh" \
   "$target_dir/references/tools/ctf-rev-start.sh" \
+  "$target_dir/references/tools/rev-intake-check.sh" \
+  "$target_dir/references/tools/rev-recover-template.py" \
+  "$target_dir/references/tools/rev-run.sh" \
   "$target_dir/references/tools/ctf-web-start.sh" \
   "$target_dir/references/tools/ctf-bench.sh" \
   "$target_dir/references/tools/ctf-bench-metrics.py" \
+  "$target_dir/references/tools/ctf-extra-prompt.sh" \
   "$target_dir/references/tools/ctf-learn.sh" \
   "$target_dir/references/tools/ctf-clean.sh" \
   "$target_dir/references/tools/ctf-export.sh" \

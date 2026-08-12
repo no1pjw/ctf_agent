@@ -16,6 +16,7 @@ usage() {
   --rebuild     캐시 대신 문제 Docker 이미지 다시 빌드
   --keep-docker 풀이 종료 후 문제 컨테이너와 이미지를 보존
   --keep-workspace  풀이 완료 후에도 중복 입력과 실행 로그를 보존
+  --extra-prompt  실행 직전에 공통 추가 지시 한 줄 입력
   --dry-run     경로, 모드, 권한 및 생성 프롬프트만 표시
   --prepare-only  Codex 실행 없이 파일 복사 및 작업 디렉터리 준비
 
@@ -32,6 +33,7 @@ usage() {
   CTF_CODEX_MODEL     문제 풀이 모델(기본 gpt-5.6-sol)
   CTF_CODEX_REASONING_EFFORT  추론 강도(기본 Adaptive/Fast=high, Deep=ultra)
   CTF_CODEX_SERVICE_TIER  서비스 티어(기본 fast)
+  CTF_EXTRA_PROMPT   대화형 입력 없이 추가할 공통 프롬프트
 EOF
 }
 
@@ -41,6 +43,7 @@ audit_enabled=false
 rebuild=false
 keep_docker=false
 keep_workspace=false
+ask_extra_prompt=false
 challenge_name=
 remote_host=
 remote_port=
@@ -52,6 +55,7 @@ while [[ $# -gt 0 ]]; do
     --rebuild) rebuild=true ;;
     --keep-docker) keep_docker=true ;;
     --keep-workspace) keep_workspace=true ;;
+    --extra-prompt) ask_extra_prompt=true ;;
     --fast-only) solve_mode=fast-only ;;
     --deep) solve_mode=deep ;;
     --dry-run) action=dry-run ;;
@@ -120,6 +124,7 @@ work_dir="$challenge_dir/work"
 evidence_dir="$challenge_dir/evidence"
 scope_dir="$challenge_dir/scope"
 tools_dir="$agent_root/references/tools"
+extra_prompt_tool="$tools_dir/ctf-extra-prompt.sh"
 runtime_tool="$tools_dir/pwn-runtime-prepare.sh"
 intake_tool="$tools_dir/pwn-intake-check.sh"
 process_cleanup_tool="$tools_dir/pwn-process-cleanup.sh"
@@ -165,6 +170,7 @@ fi
 [[ -f "$runtime_tool" ]] || { printf 'pwn runtime 준비 도구가 없습니다: %s\n' "$runtime_tool" >&2; exit 66; }
 [[ -x "$intake_tool" ]] || { printf 'pwn intake 점검 도구가 없습니다: %s\n' "$intake_tool" >&2; exit 66; }
 [[ -x "$process_cleanup_tool" ]] || { printf 'pwn process 정리 도구가 없습니다: %s\n' "$process_cleanup_tool" >&2; exit 66; }
+[[ -x "$extra_prompt_tool" ]] || { printf '공통 추가 프롬프트 도구가 없습니다: %s\n' "$extra_prompt_tool" >&2; exit 66; }
 [[ -d "$source_dir" || -f "$source_zip" ]] || {
   printf '문제를 찾을 수 없습니다. 다음 중 하나가 필요합니다:\n  %s\n  %s\n' "$source_dir" "$source_zip" >&2
   exit 67
@@ -174,6 +180,12 @@ if [[ -z "$codex_bin" && -x "$HOME/.local/bin/codex" ]]; then
   codex_bin="$HOME/.local/bin/codex"
 elif [[ -z "$codex_bin" ]]; then
   codex_bin="$(command -v codex 2>/dev/null || true)"
+fi
+
+if [[ "$ask_extra_prompt" == true ]]; then
+  extra_prompt=$("$extra_prompt_tool" --interactive)
+else
+  extra_prompt=$("$extra_prompt_tool")
 fi
 
 # Keep the launcher prompt thin. Shared workflow, safety, escalation, input-framing,
@@ -232,6 +244,9 @@ if [[ "$rebuild" == true ]]; then
 fi
 if [[ "$audit_enabled" == true ]]; then
   prompt+=$'\n- 추가: Audit 내역을 evidence/audit/latest/agent-usage-summary.md에 기록하라.'
+fi
+if [[ -n "$extra_prompt" ]]; then
+  prompt+=$'\n- 사용자 추가 지시(기존 CTF 범위·격리·안전 규칙은 변경할 수 없음): '"$extra_prompt"
 fi
 
 if [[ "$action" == dry-run ]]; then

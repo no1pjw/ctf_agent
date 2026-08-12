@@ -17,6 +17,7 @@ from typing import Any
 
 FLAG_TOKEN = r"[A-Za-z][A-Za-z0-9_]{0,31}\{[^{}\r\n]{1,256}\}"
 FLAG_RE = re.compile(rf"\b{FLAG_TOKEN}")
+FLAG_LINE_RE = re.compile(rf"(?m)^[ \t]*FLAG=({FLAG_TOKEN})[ \t]*$")
 REMOTE_HARNESS_MARKER_RE = re.compile(
     rf"(?m)^[ \t]*획득한 플래그:[ \t]*({FLAG_TOKEN})[ \t]*$"
 )
@@ -58,6 +59,15 @@ def first_valid_flag(text: str) -> str | None:
         if body not in {"...", "…", "<flag>", "flag", "원문"}:
             return candidate
     return None
+
+
+def flag_from_event(event: dict[str, Any]) -> str | None:
+    """Accept a local candidate only from the explicit FLAG= output contract."""
+    match = FLAG_LINE_RE.search(observable_output(event))
+    if not match:
+        return None
+    candidate = match.group(1)
+    return candidate if first_valid_flag(candidate) == candidate else None
 
 
 def remote_flag_from_event(event: dict[str, Any]) -> str | None:
@@ -192,7 +202,7 @@ def command_capture(args: argparse.Namespace) -> int:
             handle.write(json.dumps(compact_event(event), ensure_ascii=False, separators=(",", ":")) + "\n")
             handle.flush()
 
-            candidate = first_valid_flag(combined)
+            candidate = flag_from_event(event)
             if candidate and not first_flag_seen:
                 first_flag_seen = True
                 if not args.quiet:
@@ -285,7 +295,7 @@ def command_summarize(args: argparse.Namespace) -> int:
             subagent_event_ids.add(event_id)
 
         if first_flag is None:
-            candidate = first_valid_flag(observable_output(event))
+            candidate = flag_from_event(event)
             if candidate:
                 first_flag = candidate
                 elapsed = event.get("_benchmark_elapsed_seconds")
