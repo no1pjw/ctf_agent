@@ -10,7 +10,7 @@ Codex CLI에서 로컬 CTF 문제를 분야별 에이전트와 재현 가능한 
 - `ctf-learn`: 완료된 풀이에서 검증된 재사용 교훈만 분야별 피드백에 축적
 - `ctf-clean`: 학습·풀이 결과를 보존하면서 중복 입력, 실행 로그와 재생성 캐시 정리
 - 복합 pwn 문제의 최근 20단계 체크포인트와 1MiB 원격 transcript 상한
-- `ctf-pwn`은 기본적으로 `gpt-5.6-sol` + `ultra` 추론 + `fast` 서비스 티어 사용
+- `ctf-pwn`은 기본적으로 `gpt-5.6-sol` + `high` 추론을 사용하며, `--deep`에서만 `ultra`로 전환; 모든 모드에서 `fast` 서비스 티어와 Fast mode 활성화
 - `ctf-rev` 문제 풀이는 기본적으로 `gpt-5.6-sol` + `ultra` 추론 사용
 - `ctf-export`: 원본을 수정하지 않고 GitHub 공개용 복사본과 로컬 커밋 생성
 - pwn, reverse engineering, web, crypto, forensics/misc 라우팅
