@@ -1,7 +1,29 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+command_name=$(basename -- "$0")
+fixed_category=
+case "$command_name" in
+  ctf-learn-pwn) fixed_category=pwn ;;
+  ctf-learn-rev) fixed_category=rev ;;
+  ctf-learn-web) fixed_category=web ;;
+  ctf-learn|ctf-learn.sh) ;;
+  *) command_name=ctf-learn ;;
+esac
+
 usage() {
+  if [[ -n "$fixed_category" ]]; then
+    cat <<EOF
+사용법: $command_name [옵션] 문제이름
+
+이 명령은 분야가 '$fixed_category'로 고정되며 다른 Agent의 feedback을 수정하지 않습니다.
+
+옵션:
+  --dry-run            분야, 경로 및 Codex 프롬프트만 표시
+  -h, --help           도움말 표시
+EOF
+    return
+  fi
   cat <<'EOF'
 사용법: ctf-learn [옵션] 문제이름
 
@@ -14,13 +36,17 @@ usage() {
 EOF
 }
 
-category=
+category=$fixed_category
 action=run
 challenge_name=
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --category)
+      [[ -z "$fixed_category" ]] || {
+        printf '%s은(는) 분야가 %s로 고정되어 --category를 사용할 수 없습니다.\n' "$command_name" "$fixed_category" >&2
+        exit 64
+      }
       [[ $# -ge 2 ]] || { echo '--category 값이 필요합니다.' >&2; exit 64; }
       category=$2
       shift 2
@@ -70,13 +96,9 @@ feedback_dir="$agent_root/$feedback_rel"
 
 prompt=$(cat <<EOF
 \$ctf-learn
-
-완료된 CTF 문제 '$challenge_name'에서 이후에도 재사용할 수 있는 새 교훈만 선별하라.
-분야: $category
-검토할 문제 경로: $challenge_dir
-수정이 허용된 피드백 경로: $feedback_dir
-
-work의 write-up과 solver를 우선 검토하고 기존 index.md 및 관련 주제 문서와 중복을 확인하라. 읽기·검색 호출은 최대 6회로 제한하고, 핵심 주장이 불충분할 때만 정확히 알려진 최소 evidence 파일을 추가로 읽으며 input 전체를 열거하지 마라. 플래그, 문제명, 정확한 주소/offset/payload 등 문제 전용 정답은 저장하지 마라. 관찰로 검증되고 다른 문제에도 적용 가능하며 다음 저비용 확인법이 있는 내용만 기존 주제에 통합하거나 새 주제 문서로 추가하라. 새 교훈이 없으면 파일을 수정하지 마라. Git 상태를 확인하지 말고 실제 편집 여부만 보고하라. 문제를 다시 실행하거나 네트워크에 접속하지 말고, 사용자에게 보이는 설명은 한국어로 작성하라.
+완료 문제 '$challenge_name'($category)의 work solver/write-up에서 새 일반 교훈만 $feedback_dir에 중복 없이 반영하라.
+읽기는 6회 이하로 하고 문제 재실행·네트워크·input 전수 확인은 금지한다. flag, 문제명, 주소·offset·payload 등 정답은 저장하지 않는다.
+재사용 가능하고 관찰로 검증되며 다음 저비용 확인법이 있는 내용만 기록한다. 새 교훈이 없으면 수정하지 말고 결과를 한국어 한 줄로 보고하라.
 EOF
 )
 
@@ -101,6 +123,7 @@ trace_file="$(mktemp /tmp/ctf-learn.XXXXXX.log)"
 trap 'rm -f -- "$trace_file"' EXIT
 set +e
 "$codex_bin" -C "$feedback_dir" -c 'model_reasoning_effort="low"' \
+  -c 'service_tier="fast"' --enable fast_mode \
   --sandbox workspace-write --ask-for-approval never \
   exec --ephemeral --skip-git-repo-check "$prompt" 2>"$trace_file"
 status=$?

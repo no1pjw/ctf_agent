@@ -1,60 +1,26 @@
 ---
 name: ctf-rev
-description: Solve explicitly authorized local CTF reverse-engineering challenges from supplied native binaries, managed bytecode, virtual machines, packers, scripts, firmware, or obfuscated programs. Use for static mapping, sandboxed dynamic analysis, algorithm and constraint recovery, deobfuscation, minimal recovery scripting, and verified flag derivation.
+description: Solve explicitly authorized local CTF reverse-engineering challenges by bounded static analysis, sandboxed execution, minimal recovery scripting, and verified flag derivation.
 ---
 
 # CTF Reverse Engineering
 
-사용자에게 보이는 진행·오류·결과는 한국어로 쓴다. 명령, 코드, 심볼과 flag는 원문을 유지한다.
-
-The objective is minimum time to a verified flag. Treat each supplied artifact as an answer-extraction target, not a whole-program-understanding assignment.
-
-## Fast contract
-
-1. The launcher-selected paths are authoritative. Read `$CTF_REV_WORK_DIR/intake-exec.txt` when that variable is set; otherwise use the exact intake path in the prompt. Never search the workspace for it and never reopen this `SKILL.md` with a tool.
-2. Preserve the input; calculate no checksums; use no browser, web search, GitHub search, write-up, or subagent. Do not preload policy, role/playbook, or the feedback index.
-3. Run `"$CTF_REV_FAST_PROBE" "$CTF_REV_INPUT_DIR"` once when the launcher provides it. Otherwise use one equivalent bounded probe for format/runtime, concise symbols/imports, flag-shaped strings/resources, success/failure references, and the nearest validator or decoder. Keep output under 16 KiB.
-4. Test at most two direct flag hypotheses. Prefer an embedded constant/resource, compact decoder, one validator inversion, or bounded constraint model.
-5. Open one matching feedback or playbook file only after a concrete blocker identifies the topic.
-
-Do not spend a separate turn narrating a hypothesis when the next bounded test is obvious. Run that test directly; reserve user-visible text for a real blocker or the verified flag.
-
-## Direct-path rules
-
-- Analyze only functions and data on the shortest suspected flag path. Do not enumerate all functions, build a complete CFG/call graph, or broadly decompile.
-- Never dump or disassemble an entire large raw blob or section. First recover referenced offsets, then inspect bounded windows with `xxd -s/-l`, `dd`, or an address-limited disassembly.
-- Once a transformation is clear, extract its constants and run the smallest inverse immediately. Do not add another descriptive analysis turn first.
-- A recorded flag format such as `XMAS{...}` may be a submission wrapper rather than bytes accepted by the program. If a verified payload lacks the wrapper, construct and test `PREFIX{payload}` before rejecting the recovery equation.
-- Make `work/recover.py` the smallest reproducible extractor. Do not build a general emulator or framework when a direct command or short script is sufficient.
-
-## Execution boundary
-
-- Never execute challenge artifacts on the host, even with `danger-full-access`.
-- Static tools such as `file`, `readelf`, `objdump`, `nm`, `strings`, archive listing, and parsers may inspect inputs without executing them.
-- Dynamic analysis is allowed only through `$CTF_REV_RUNNER --input-dir "$CTF_REV_INPUT_DIR" "$CTF_REV_IMAGE" <COMMAND>`. Inputs appear read-only at `/ctf-input`. Use an explicit bounded command; never invoke a bare image or enable network access.
-- If Dockerfile/image preparation fails, continue STATIC-ONLY. Do not create an ad-hoc online environment, download a runtime, or substitute an unrelated host runtime.
-- Treat decompiler output as a hypothesis. Confirm decisive branches, widths, signedness, table indexes, and constants against disassembly or an independent implementation.
+목표는 전체 프로그램 이해가 아니라 가장 짧은 검증 가능한 flag 추출이다. 진행을 설명하지 말고 다음 검사를 실행한다.
 
 ## Fast path
 
-- Native: identify input, transform/compare, success output, and anti-analysis checks; inspect only the functions and data referenced by that path.
-- Managed/bytecode: identify the exact runtime and entry method, then recover constants/opcodes without setting up a broad framework.
-- VM/obfuscation: recover dispatcher state, opcode semantics, state transition, and exit predicate incrementally; emulate only the slice required for the flag.
-- Packers: prove unpacking is necessary before spending time on it. Prefer a sandboxed memory dump or deterministic loader reconstruction over manual cleanup.
-- Constraints: simplify first, bound the domain, and use a solver only when cheaper algebraic inversion is disproved. Never launch unbounded brute force.
-- Combine recovery-script creation, syntax checking, decisive verification, and `.solved` recording into the fewest tool turns possible.
+1. `$CTF_REV_WORK_DIR/intake-exec.txt`를 읽고, 제공되면 `"$CTF_REV_FAST_PROBE" "$CTF_REV_INPUT_DIR"`를 한 번 실행한다. 경로·Skill·정책을 다시 검색하지 않는다.
+2. flag 문자열/리소스 → 성공 참조·비교 상수 → 가장 가까운 validator/decoder 순으로 본다. 첫 출력은 16 KiB 이하로 제한한다.
+3. 직접 가설은 최대 두 개만 시험한다. embedded data, 짧은 decoder, validator 역산, bounded constraint를 우선한다.
+4. 변환이 보이면 즉시 최소 inverse를 작성한다. 전체 함수 열거, CFG, broad decompile, raw blob 전체 dump는 하지 않는다.
 
-## Verification and completion
+큰 blob은 먼저 참조 offset을 구한 뒤 bounded window만 본다. VM/obfuscation도 flag에 필요한 dispatcher state와 opcode slice만 복원한다. 대수적 역산이 가능하면 emulator/solver보다 우선하며 모든 후보는 정방향 식으로 재검증한다. 프로그램 payload와 `PREFIX{payload}` 제출 wrapper를 구분한다.
 
-- Verify a candidate with the cheapest decisive method: one independent reconstruction or one bounded positive run inside the supplied Docker image. Add a negative control only when acceptance remains ambiguous.
-- A flag-looking string embedded in data is only a candidate until its derivation or success path is verified. Format wrapping alone is not a failed recovery hypothesis.
-- Print `FLAG=<value>` immediately after verification, then write the exact word `verified` to `work/.solved`.
-- After printing a verified flag, make no more tool calls and do not delay completion for write-up, cleanup, feedback, or a broader function map. `ctf-learn` handles durable lessons later.
+## 경계와 검증
 
-## State and escalation
+- 입력은 수정하지 않고 호스트에서 실행하지 않는다. 동적 검증은 `$CTF_REV_RUNNER`와 `$CTF_REV_IMAGE`가 제공될 때 network-disabled Docker에서 bounded command로만 수행한다.
+- Docker가 없으면 STATIC-ONLY로 계속한다. decompiler 결과의 width, signedness, index, constant는 disassembly나 독립 구현으로 확인한다.
+- 필요한 경우에만 최소 `work/recover.py`를 만들고, 복구·syntax·검증·`.solved` 기록을 가능한 한 한 도구 턴으로 합친다.
+- 검증된 flag를 얻으면 즉시 `FLAG=<value>`를 출력하고 `.solved=verified`를 기록한 뒤 추가 분석·write-up 없이 종료한다.
 
-- Keep Fast work in the active session. Create a minimal `work/state.json` checkpoint only after roughly 10 minutes, two evidence-bearing recovery failures, a long-running bounded job, or real interruption risk.
-- Store only the current invariant, strategy, constraints, failed discriminator, and next test. Do not store flags, dumps, or command transcripts in state.
-- Escalate in place for stripped/source-absent targets, packing, obfuscation, anti-debugging, unknown VM/bytecode, environment mismatch, two failed direct recovery attempts, or budget exhaustion. Deep mode remains flag-directed and does not authorize whole-program analysis by default. Reuse every passed stage.
-
-Return the shortest recovery chain, `work/recover.py`, decisive verification, and the verified flag.
+직접 복원 두 번 실패, packing/VM/난독화, anti-debugging 또는 환경 불일치가 있을 때만 관련 feedback 하나를 읽고 같은 세션에서 범위를 확장한다.

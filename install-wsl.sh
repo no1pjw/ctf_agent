@@ -59,6 +59,9 @@ for bench_category in pwn rev web crypto forensics; do
   ln -sfn "$target_dir/references/tools/ctf-bench.sh" "$HOME/.local/bin/ctf-bench-$bench_category"
 done
 ln -sfn "$target_dir/references/tools/ctf-learn.sh" "$HOME/.local/bin/ctf-learn"
+for learn_category in pwn rev web; do
+  ln -sfn "$target_dir/references/tools/ctf-learn.sh" "$HOME/.local/bin/ctf-learn-$learn_category"
+done
 ln -sfn "$target_dir/references/tools/ctf-clean.sh" "$HOME/.local/bin/ctf-clean"
 ln -sfn "$target_dir/references/tools/ctf-export.sh" "$HOME/.local/bin/ctf-export"
 
@@ -83,6 +86,7 @@ printf 'Web launcher:        %s\n' "$HOME/.local/bin/ctf-web"
 printf 'Benchmark command:   %s\n' "$HOME/.local/bin/ctf-bench"
 printf 'Category benchmarks: %s\n' "$HOME/.local/bin/ctf-bench-{pwn,rev,web,crypto,forensics}"
 printf 'Learning command:    %s\n' "$HOME/.local/bin/ctf-learn"
+printf 'Category learning:   %s\n' "$HOME/.local/bin/ctf-learn-{pwn,rev,web}"
 printf 'Cleanup command:     %s\n' "$HOME/.local/bin/ctf-clean"
 printf 'Export command:      %s\n' "$HOME/.local/bin/ctf-export"
 printf 'Start with: cd %q && codex\n' "$target_dir"

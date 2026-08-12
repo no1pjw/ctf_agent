@@ -1,60 +1,36 @@
 ---
 name: ctf-pwn
-description: Solve explicitly authorized CTF pwn challenges from supplied artifacts and an optional exact official endpoint. Covers exploit analysis, local sandbox validation, remote synchronization, and flag acquisition.
+description: Solve explicitly authorized CTF pwn challenges from supplied artifacts and an optional exact official endpoint, using sandboxed local validation and rapid flag acquisition.
 ---
 
 # CTF Pwn
 
-사용자에게 보이는 진행·오류·결과는 한국어로 쓴다. 명령, 코드, 심볼, 프로토콜 토큰은 정확성을 위해 원문을 유지한다.
+목표는 검증된 flag까지의 시간을 최소화하는 것이다. 진행을 설명하지 말고 다음 검사를 실행한다.
 
-## Start lean
+## 시작
 
-1. Read only `work/runtime/runtime.env`, `work/intake-exec.txt`, and non-empty `work/state.json`. Do not preload `HARD_RULES.md`, `role.md`, `playbook.md`, `ruleset.md`, or the full feedback index.
-2. Treat the launcher-selected pwn route and recorded CTF scope as fixed. Preserve inputs, calculate no checksums, use no browser/web/search/write-up source, and never execute challenge artifacts on the host.
-3. Run one narrow combined probe, choose the cheapest falsifiable hypothesis, and create or edit `work/solve.py` as soon as a primitive is plausible. Open one matching playbook/feedback document only after a concrete blocker identifies the topic.
-4. Before a validated flag, never read, create, or modify `work/writeup.md`. A benchmark skips write-up entirely.
+1. `work/runtime/runtime.env`, `work/intake-exec.txt`, 비어 있지 않은 `work/state.json`만 읽는다. 다른 정책·playbook·feedback은 blocker가 생겼을 때 관련 파일 하나만 연다.
+2. 소스, mitigations, symbols/imports, 관련 함수만 한 번의 좁은 probe로 본 뒤 가장 싼 가설을 고르고 즉시 `work/solve.py`를 만든다.
+3. `win`/flag 함수, 기존 call·hook·return slot처럼 단계가 짧은 경로를 범용 arbitrary-RW·ORW·긴 gadget chain보다 우선한다. heap이라는 이유만으로 Deep으로 가지 않는다.
 
-The objective function is minimum time to a validated flag. Rank candidate chains by expected remaining steps, required leaks, environment dependencies, and failure surface. Prefer an existing `win`/flag path, one direct call, or the shortest controllable return/hook effect over a more general arbitrary-read/write or ORW framework. Portability, elegance, and exploit generality are secondary unless the short path is disproved.
+## 런타임
 
-## Runtime and execution
+- `ready`: 기록된 libc와 일치하는 loader/libc를 `pwn-run.sh`로 사용한다. host libc, `LD_PRELOAD` 단독, 입력 binary patch는 금지한다.
+- `incompatible`: 원격용 supplied libc와 로컬 image pair를 섞지 않는다. image pair는 구조 검증에만 쓴다.
+- Docker/runtime이 없으면 STATIC-ONLY로 계속한다. 문제 binary는 호스트에서 실행하지 않는다.
+- bare image/service를 방치하지 말고 모든 로컬 실행을 bounded harness로 수행한다.
 
-- `runtime_status=ready`: use the recorded libc for offsets and the matching loader/libc pair through `pwn-run.sh`; never use host libc, `LD_PRELOAD` alone, or patch the input binary.
-- `runtime_status=incompatible`: keep supplied libc calculations separate from the exact image pair. For alignment-sensitive or multi-stage userland exploits, one image-pair structural run is allowed; it does not validate remote offsets.
-- `runtime_status=not-applicable`: this is valid when there is no supplied dynamic userland target. Do not mistake a build/container runtime for the challenge target's libc/loader.
-- Missing Docker/runtime is non-fatal: continue STATIC-ONLY and use the exact recorded official endpoint only after a parameterized solver is statically cross-checked.
-- All target execution goes through the provided Docker/sandbox harness. A generated remote client may contact only `scope/remote-target.env`.
-- Never invoke `pwn-run.sh IMAGE` as a probe. A bare image may start a long-lived QEMU/service CMD. Use an explicit bounded command for inspection; use `pwn-run.sh --service IMAGE` only inside a solver that immediately drives stdin/stdout and closes it. A local timeout ends only that harness-owned container, then solving continues.
+## 빠른 exploit
 
-## Fast path
+- primitive가 보이면 layout discriminator는 최대 한 번만 수행하고 첫 solver를 실행한다.
+- 필요한 gadget semantics를 먼저 정한 뒤 gadget index는 한 번만 사용한다. 부족하면 기존 call/dispatch/leak 등 다른 짧은 primitive로 전환한다.
+- syntax check와 다음 로컬/원격 실행을 한 명령으로 합친다. 환경·framing 실패를 exploit 실패와 구분한다.
+- solver에는 필요한 경우 `STAGE=<name>`과 bounded `DIAG=`만 넣고 장황한 transcript는 만들지 않는다.
 
-- Combine source, `file`/mitigations, symbols/imports, and the relevant function disassembly into one narrow probe. Do not repeat broad static enumeration.
-- Define required gadget semantics first, run `pwn-gadget-index.sh` once, reuse its cache, and stop searching when scarcity is established. Switch to existing calls/dispatch, leaks, ret2dlresolve, or another evidence-backed primitive.
-- Prove only reachability -> control/leak -> calculation -> final effect. Prefer the shortest challenge-specific pwntools solver; do not build a generic socket/argument framework.
-- Combine syntax check and the next local/remote execution in one command when possible.
-- Do not leave a direct service invocation pending while continuing static work. One active local service per variant is the maximum; wait for or close it before another local execution.
-- Once source or one probe establishes the primitive, allow at most one targeted layout/offset discriminator before writing the first solver. Do not finish a comprehensive object map first.
-- Do not run gadget indexing merely because control flow or UAF exists. First test whether an existing function, imported call, writable hook/object, return slot, or direct command path completes the flag with fewer stages. Index gadgets only for the already-selected shortest chain.
-- A heap/UAF challenge is not automatically Deep. Stay Fast while the primitive and a direct flag chain are concrete; escalate only after two evidence-bearing solver failures or a genuinely unresolved invariant.
+## 원격과 완료
 
-## Complex target discipline
+- 새 solver가 로컬 성공할 때마다 기록된 정확한 endpoint에 즉시 동기화한다. 로컬 실행이 불가능하면 정적 교차 확인된 첫 버전과 실질적으로 수정된 버전만 시도한다.
+- 변경 없는 자동 반복, brute force, flood는 금지한다. 실패 후에는 마지막 stage, framing, leak/base, runtime 출처만 비교한다.
+- 원격 `FLAG=<flag>`를 받으면 연결을 닫고 즉시 출력한 뒤 `.solved=verified`를 기록하고 종료한다. 검증·cleanup·write-up을 기다리지 않는다.
 
-- Inspect the actual Docker/runner/service entrypoint in the first combined probe. An invocation, transport, upload, or framing mistake is an environment failure, not an exploit failure and not a reason to restart or enter Deep mode. Correct it once and continue from the same hypothesis.
-- Do not infer the vulnerability from the challenge name. Give a name-related theory at most one cheap discriminator; otherwise rank source, version, configuration, and exposed-interface evidence.
-- Start with the smallest payload compatible with the proven primitive. If payload size or one upload/framing timeout becomes the blocker, switch immediately to a minimal freestanding form instead of retrying a large generic build.
-- Once a strong read/write or control primitive exists, prefer a deterministic object/identity anchor and the shortest direct final effect. Verify permissions, copy-on-write, and alignment once before abandoning a nearly complete path.
-- Keep one current strategy plus one evidence-backed fallback. Do not cascade through unrelated final effects without new evidence.
-
-## Local/remote synchronization
-
-- Instrument the solver with secret-free `STAGE=<name>` and bounded `DIAG=<label> len=<n> hex=<max-32-bytes>` output before remote use.
-- Every materially new solver that succeeds locally is run remotely immediately. If exact local execution is unavailable, run the first statically cross-checked solver and each materially corrected version. Never replay an unchanged version automatically, brute-force, or flood.
-- After failure compare only the last stage, framing, leak/base calculation, runtime provenance, and the failed invariant. Do not restart completed analysis.
-- A validated remote `FLAG=<flag>` ends the solve immediately: close the connection, print the flag and acquisition time, then record `verified` in `work/.solved`. Do not delay it for P5, controls, cleanup, or documentation.
-
-## State and escalation
-
-- Keep ordinary Fast work in the active session. Write a checkpoint only after roughly 10 minutes, two failed exploit trials, a probabilistic/multi-stage handoff, or a real interruption risk. In benchmarks, do not checkpoint before the flag.
-- Checkpoint only `invariant`, `strategy`, `constraints`, and `next`; never store flags, dumps, or command transcripts in state.
-- Escalate in place only for genuinely unresolved source absence, obfuscation, race/probabilistic behavior, environment mismatch, or two evidence-bearing exploit failures. Heap usage alone is not an escalation trigger. Reuse all passed stages.
-
-Return the primitive chain, exact environment, `work/solve.py`, decisive diagnostics, and the validated flag. Never generalize the exploit to unrelated targets or submit the flag automatically.
+두 근거 있는 solver 실패, race/확률성, 난독화 또는 환경 불일치가 있을 때만 기존 결과를 유지한 채 Deep으로 확장한다.

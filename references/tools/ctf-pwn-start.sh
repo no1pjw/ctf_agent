@@ -16,7 +16,8 @@ usage() {
   --rebuild     캐시 대신 문제 Docker 이미지 다시 빌드
   --keep-docker 풀이 종료 후 문제 컨테이너와 이미지를 보존
   --keep-workspace  풀이 완료 후에도 중복 입력과 실행 로그를 보존
-  --extra-prompt  실행 직전에 공통 추가 지시 한 줄 입력
+  --extra-prompt  실행 직전에 여러 줄 추가 지시 입력(.end로 종료)
+  --verbose     상세 Codex TUI와 준비 로그 표시(기본: 최종 결과만 출력)
   --dry-run     경로, 모드, 권한 및 생성 프롬프트만 표시
   --prepare-only  Codex 실행 없이 파일 복사 및 작업 디렉터리 준비
 
@@ -31,7 +32,7 @@ usage() {
   CODEX_BIN           Codex CLI의 명시적 경로
   CTF_MIN_HOST_FREE_MB 실행 전 필요한 Windows 호스트 최소 여유 공간(MiB, 기본 4096)
   CTF_CODEX_MODEL     문제 풀이 모델(기본 gpt-5.6-sol)
-  CTF_CODEX_REASONING_EFFORT  추론 강도(기본 Adaptive/Fast=high, Deep=ultra)
+  CTF_CODEX_REASONING_EFFORT  추론 강도(기본 max)
   CTF_CODEX_SERVICE_TIER  서비스 티어(기본 fast)
   CTF_EXTRA_PROMPT   대화형 입력 없이 추가할 공통 프롬프트
 EOF
@@ -44,6 +45,7 @@ rebuild=false
 keep_docker=false
 keep_workspace=false
 ask_extra_prompt=false
+quiet_output=true
 challenge_name=
 remote_host=
 remote_port=
@@ -51,11 +53,12 @@ positionals=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --audit) audit_enabled=true ;;
+    --audit) audit_enabled=true; quiet_output=false ;;
     --rebuild) rebuild=true ;;
     --keep-docker) keep_docker=true ;;
     --keep-workspace) keep_workspace=true ;;
     --extra-prompt) ask_extra_prompt=true ;;
+    --verbose) quiet_output=false ;;
     --fast-only) solve_mode=fast-only ;;
     --deep) solve_mode=deep ;;
     --dry-run) action=dry-run ;;
@@ -136,10 +139,8 @@ codex_bin=${CODEX_BIN:-}
 codex_model=${CTF_CODEX_MODEL:-gpt-5.6-sol}
 if [[ -n ${CTF_CODEX_REASONING_EFFORT:-} ]]; then
   codex_reasoning_effort=$CTF_CODEX_REASONING_EFFORT
-elif [[ "$solve_mode" == deep ]]; then
-  codex_reasoning_effort=ultra
 else
-  codex_reasoning_effort=high
+  codex_reasoning_effort=max
 fi
 codex_service_tier=${CTF_CODEX_SERVICE_TIER:-fast}
 codex_offline_args=(
@@ -188,35 +189,28 @@ else
   extra_prompt=$("$extra_prompt_tool")
 fi
 
-# Keep the launcher prompt thin. Shared workflow, safety, escalation, input-framing,
-# verification, and feedback rules live in AGENTS.md, ruleset.md, and the pwn skill.
+# Shared safety and solve rules live in AGENTS.md and the injected pwn skill.
 case "$runtime_mode" in
   supplied-docker)
-    compact_runtime="제공된 Dockerfile을 하니스로 빌드·실행하고 이미지 $image_name을 사용하라."
+    compact_runtime="하니스와 이미지 $image_name을 사용하라."
     ;;
   cached-docker)
-    compact_runtime="Dockerfile은 없으므로 재빌드하지 말고 캐시 이미지 $image_name만 하니스로 사용하라."
+    compact_runtime="캐시 이미지 $image_name만 하니스로 사용하라."
     ;;
   static-only)
     if [[ -n "$remote_host" ]]; then
-      compact_runtime="Dockerfile과 캐시 이미지가 없으므로 STATIC-ONLY로 분석하되, 정적 exploit과 solver가 완성되면 로컬 실행 없이 정확한 공식 endpoint에 bounded remote client를 즉시 실행하라. challenge 바이너리의 호스트 실행은 금지한다."
+      compact_runtime="STATIC-ONLY로 분석하고 완성된 solver는 공식 endpoint에 즉시 실행하라."
     else
-      compact_runtime="Dockerfile과 캐시 이미지가 없으므로 즉시 STATIC-ONLY로 계속하라. Docker 재시도·임시 환경 생성·호스트 실행은 금지하며, 동적 검증이 꼭 필요할 때만 정확한 blocker를 남겨라."
+      compact_runtime="STATIC-ONLY로 계속하고 Docker 재시도·임시 환경·host 실행은 금지한다."
     fi
     ;;
 esac
 
 prompt=$(cat <<EOF
 \$ctf-pwn
-
-허가된 pwn 문제 '$challenge_name'을 즉시 풀어라.
-- 입력: challenges/$challenge_name/input
-- 실행: mode=$solve_mode, runtime=$runtime_mode, 파일 변경·경과 시간 감시 경고와 자동 종료는 모두 비활성이다.
-- 시작: \$ctf-pwn 스킬과 runtime.env, intake-exec.txt, 비어 있지 않은 state.json만 읽고 바로 가장 싼 결합 분석을 실행하라. HARD_RULES, role, playbook, ruleset, 전체 feedback index는 시작할 때 읽지 마라.
-- 런타임: $compact_runtime runtime.env의 libc/ld 출처를 지키고 host 런타임이나 미검증 혼합 쌍을 사용하지 마라.
-- 제한: 한국어로 진행하고 웹 검색·호스트 바이너리 실행·플래그 자동 제출을 금지한다.
-- 최우선 결과: 플래그까지 남은 단계가 가장 적은 체인을 선택해 짧은 결합 probe -> work/solve.py -> 실행 순서로 진행하라. win/직접 호출/짧은 반환·hook 경로가 있으면 범용 arbitrary-RW·ORW·gadget 체인보다 우선하고, heap이라는 이유만으로 Deep에 들어가지 마라. 환경·전송 실패는 exploit 실패와 분리하며 플래그 전에는 writeup을 건드리지 마라.
-- 성공 이후: 실제 검증된 플래그와 획득 시간을 먼저 즉시 출력한 다음 work/.solved에 verified를 기록하고, 세션이 계속될 때만 간결한 work/writeup.md를 작성하라.
+허가된 '$challenge_name'을 즉시 풀어라. input=challenges/$challenge_name/input, mode=$solve_mode, runtime=$runtime_mode.
+$compact_runtime 진행 설명·웹·host 실행·제출·flag 전 writeup 없이 최단 체인과 work/solve.py만 사용하라.
+검증 즉시 FLAG=<값>과 원격이면 획득 시간을 출력하고 .solved=verified 후 종료하라. 실패는 BLOCKED=<이유> 한 줄만 출력하라.
 EOF
 )
 
@@ -225,12 +219,7 @@ if [[ "$keep_docker" == true ]]; then
 fi
 
 if [[ -n "$remote_host" ]]; then
-  prompt+=$(cat <<EOF
-
-- 공식 원격: TCP $remote_host:$remote_port만 허용한다. 고정 시도 횟수 제한은 두지 않는다. solver가 로컬에서 새로 성공할 때마다 같은 버전을 references/tools/pwn-remote-run.sh로 즉시 원격 실행해 차이를 확인하라. 로컬 실행이 불가능하면 정적 교차 확인을 통과한 첫 버전과 이후 실질적으로 수정된 버전을 원격 실행하라. 변경 없는 exploit 자동 반복·무차별 대입·병렬 flood는 금지한다.
-- 성공: solve.py가 검증된 FLAG=<원문>을 출력하면 즉시 연결을 닫고, 하니스의 플래그와 획득 시간을 바로 보여 준 뒤 종료하라.
-EOF
-)
+  prompt+=$'\n공식 원격은 TCP '"$remote_host:$remote_port"$'만 허용한다. 새 로컬 성공 또는 실질적 수정 직후 pwn-remote-run.sh로 동기화하고, 변경 없는 반복·brute force·flood는 금지한다.'
 else
   prompt+=$'\n- 원격 범위: 미지정이므로 모든 대상 네트워크 접속 금지'
 fi
@@ -316,11 +305,13 @@ else
   printf '%s\n' "$source_zip" > "$scope_dir/source-path.txt"
   cp -a --update=none -- "$source_zip" "$input_dir"/
 fi
-printf '문제 준비 완료: %s\n' "$challenge_dir"
+if [[ "$quiet_output" == false || "$audit_enabled" == true ]]; then
+  printf '문제 준비 완료: %s\n' "$challenge_dir"
+fi
 
 if ! "$intake_tool" "$input_dir" > "$work_dir/intake-exec.txt"; then
   printf 'Docker/service 실행 파일명 자동 대조에 실패했습니다. 정적 분석은 계속할 수 있습니다.\n' >&2
-else
+elif [[ "$quiet_output" == false || "$audit_enabled" == true ]]; then
   cat -- "$work_dir/intake-exec.txt"
 fi
 
@@ -329,7 +320,11 @@ runtime_prepare_args=(--input "$input_dir" --output "$runtime_output")
 if [[ "$runtime_mode" == static-only ]]; then
   runtime_prepare_args+=(--preserve-ready)
 fi
-"$runtime_tool" "${runtime_prepare_args[@]}"
+if [[ "$quiet_output" == true && "$audit_enabled" == false ]]; then
+  "$runtime_tool" "${runtime_prepare_args[@]}" >/dev/null 2>&1
+else
+  "$runtime_tool" "${runtime_prepare_args[@]}"
+fi
 runtime_prepare_status=$?
 set -e
 if [[ $runtime_prepare_status -ne 0 ]]; then
@@ -384,14 +379,24 @@ cleanup_on_exit() {
     "$process_cleanup_tool" "$process_run_id" || true
   fi
   if [[ "$cleanup_enabled" == true ]]; then
-    printf '\n문제 Docker 리소스 정리 중: %s\n' "$image_name"
-    if ! "$tools_dir/pwn-cleanup.sh" "$image_name"; then
+    [[ "$quiet_output" == true ]] || printf '\n문제 Docker 리소스 정리 중: %s\n' "$image_name"
+    if [[ "$quiet_output" == true ]]; then
+      "$tools_dir/pwn-cleanup.sh" "$image_name" >/dev/null 2>&1 || cleanup_status=$?
+    else
+      "$tools_dir/pwn-cleanup.sh" "$image_name" || cleanup_status=$?
+    fi
+    if [[ ${cleanup_status:-0} -ne 0 ]]; then
       printf 'Docker 자동 정리에 실패했습니다. 풀이 결과와 종료 상태는 유지합니다.\n' >&2
     fi
   fi
   if [[ "$keep_workspace" == false && -f "$work_dir/.solved" && -x "$tools_dir/ctf-clean.sh" ]]; then
-    printf '\n검증 완료 문제의 중복 작업 파일 정리 중: %s\n' "$challenge_name"
-    if ! "$tools_dir/ctf-clean.sh" --apply "$challenge_name"; then
+    [[ "$quiet_output" == true ]] || printf '\n검증 완료 문제의 중복 작업 파일 정리 중: %s\n' "$challenge_name"
+    if [[ "$quiet_output" == true ]]; then
+      "$tools_dir/ctf-clean.sh" --apply "$challenge_name" >/dev/null 2>&1 || workspace_cleanup_status=$?
+    else
+      "$tools_dir/ctf-clean.sh" --apply "$challenge_name" || workspace_cleanup_status=$?
+    fi
+    if [[ ${workspace_cleanup_status:-0} -ne 0 ]]; then
       printf '작업공간 자동 정리에 실패했습니다. 풀이 및 학습 기록은 그대로 보존됩니다.\n' >&2
     fi
   fi
@@ -410,6 +415,9 @@ if [[ -f "$input_dir/Dockerfile" ]]; then
   if [[ "$audit_enabled" == true ]]; then
     "$tools_dir/pwn-build.sh" "${build_args[@]}" "$input_dir" "$image_name" 2>&1 | tee "$audit_dir/docker-build.log"
     build_status=${PIPESTATUS[0]}
+  elif [[ "$quiet_output" == true ]]; then
+    "$tools_dir/pwn-build.sh" "${build_args[@]}" "$input_dir" "$image_name" >/dev/null 2>&1
+    build_status=$?
   else
     "$tools_dir/pwn-build.sh" "${build_args[@]}" "$input_dir" "$image_name"
     build_status=$?
@@ -430,6 +438,9 @@ if [[ "$runtime_status" != ready && $build_status -eq 0 ]] && docker image inspe
   if [[ "$audit_enabled" == true ]]; then
     "$runtime_tool" --input "$input_dir" --output "$runtime_output" --image "$image_name" 2>&1 | tee "$audit_dir/runtime-prepare.log"
     runtime_prepare_status=${PIPESTATUS[0]}
+  elif [[ "$quiet_output" == true ]]; then
+    "$runtime_tool" --input "$input_dir" --output "$runtime_output" --image "$image_name" >/dev/null 2>&1
+    runtime_prepare_status=$?
   else
     "$runtime_tool" --input "$input_dir" --output "$runtime_output" --image "$image_name"
     runtime_prepare_status=$?
@@ -440,7 +451,9 @@ fi
 
 runtime_status=$(runtime_scalar runtime_status)
 runtime_source=$(runtime_scalar runtime_source)
-printf 'libc/ld runtime: status=%s source=%s manifest=%s\n' "${runtime_status:-unavailable}" "${runtime_source:-none}" "$runtime_manifest"
+if [[ "$quiet_output" == false || "$audit_enabled" == true ]]; then
+  printf 'libc/ld runtime: status=%s source=%s manifest=%s\n' "${runtime_status:-unavailable}" "${runtime_source:-none}" "$runtime_manifest"
+fi
 export CTF_PWN_RUNTIME_DIR="$runtime_output"
 export CTF_PWN_RUNTIME_MANIFEST="$runtime_manifest"
 export CTF_PWN_RUNTIME_STATUS="${runtime_status:-unavailable}"
@@ -498,6 +511,9 @@ if [[ $build_status -eq 0 ]] && docker image inspect "$image_name" >/dev/null 2>
   if [[ "$audit_enabled" == true ]]; then
     "$tools_dir/pwn-env-preflight.sh" --image "$image_name" 2>&1 | tee "$audit_dir/preflight.log"
     preflight_status=${PIPESTATUS[0]}
+  elif [[ "$quiet_output" == true ]]; then
+    "$tools_dir/pwn-env-preflight.sh" --image "$image_name" >/dev/null 2>&1
+    preflight_status=$?
   else
     "$tools_dir/pwn-env-preflight.sh" --image "$image_name"
     preflight_status=$?
@@ -506,7 +522,11 @@ elif [[ ! -f "$input_dir/Dockerfile" ]]; then
   printf 'Dockerfile과 캐시 이미지가 없어 STATIC-ONLY로 계속합니다.\n'
   preflight_status=0
 else
-  "$tools_dir/pwn-env-preflight.sh"
+  if [[ "$quiet_output" == true ]]; then
+    "$tools_dir/pwn-env-preflight.sh" >/dev/null 2>&1
+  else
+    "$tools_dir/pwn-env-preflight.sh"
+  fi
   preflight_status=$?
 fi
 set -e
@@ -526,6 +546,29 @@ if [[ "$audit_enabled" == true ]]; then
   codex_status=$?
   set -e
   printf 'finished_utc=%s\ncodex_exit_status=%s\nstatus=finished\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$codex_status" >> "$audit_dir/run-info.txt"
+  exit "$codex_status"
+fi
+
+if [[ "$quiet_output" == true ]]; then
+  if [[ -n "$remote_host" ]]; then
+    printf 'CTF pwn 시작: %s -> %s:%s\n' "$challenge_name" "$remote_host" "$remote_port"
+  else
+    printf 'CTF pwn 시작: %s\n' "$challenge_name"
+  fi
+  codex_stderr=$(mktemp "${TMPDIR:-/tmp}/ctf-pwn-${challenge_name}.XXXXXX.log")
+  set +e
+  "$codex_bin" exec --ephemeral --skip-git-repo-check -C "$agent_root" \
+    --model "$codex_model" -c "model_reasoning_effort=\"$codex_reasoning_effort\"" \
+    -c "service_tier=\"$codex_service_tier\"" --enable fast_mode \
+    "${codex_offline_args[@]}" --sandbox "$sandbox_mode" \
+    -c "approval_policy=\"$approval_policy\"" "$prompt" 2>"$codex_stderr"
+  codex_status=$?
+  set -e
+  if [[ $codex_status -ne 0 ]]; then
+    printf 'Codex 실행 실패(status=%s):\n' "$codex_status" >&2
+    tail -n 20 "$codex_stderr" >&2
+  fi
+  rm -f -- "$codex_stderr"
   exit "$codex_status"
 fi
 

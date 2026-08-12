@@ -1,18 +1,15 @@
 ---
 name: ctf-web
-description: Analyze and solve explicitly authorized CTF web challenges from supplied source, local containers, or exact official challenge origins. Use for route and trust-boundary mapping, authentication and authorization logic, parser behavior, injection, request smuggling simulations, browser-side flaws, and reproducible flag derivation.
+description: Solve explicitly authorized local CTF web challenges from supplied source and isolated containers, using bounded route and trust-boundary analysis with reproducible flag derivation.
 ---
 
 # CTF Web
 
-Read `../docs/HARD_RULES.md`, then `../docs/role.md` and `../docs/playbook.md`. Read the active challenge ledger and `../../rules/ruleset.md`.
+1. `work/web-runtime.env`를 읽고 기록된 loopback origin만 사용한다. 입력은 수정하지 않고 외부 host에는 접속하지 않는다.
+2. 소스에서 flag까지 필요한 route, role/state, parser, sink만 좁혀 가장 싼 가설 최대 세 개를 세운다.
+3. 각 가설은 baseline → 단일 mutation → 필요할 때만 negative control로 검증한다. broad scanner, brute force, DoS, 외부 callback은 금지한다.
+4. 다음 요청이 명확하면 진행 설명 없이 실행한다. blocker가 생겼을 때만 관련 feedback 하나를 읽는다.
+5. 준비된 `work/solve.py`를 최소 재현으로 수정한다. 상세 trace와 write-up은 flag 전에는 만들지 않는다.
+6. 실제 flag가 재현되면 즉시 `FLAG=<value>`를 출력하고 `.solved=verified`를 기록한 뒤 종료한다.
 
-1. Read `work/web-runtime.env` first. The launcher starts a supplied Compose file before a standalone Dockerfile and records the only allowed loopback origin. If neither exists, remain STATIC-ONLY until a minimal work-only container is justified.
-2. Record the exact allowed origin, accounts, methods, and rate constraints before remote traffic.
-3. In a bounded Fast Probe, read only `../feedback/index.md` initially and open a linked feedback file only when its symptoms match. Map only the routes, state, roles, parsers, and trust boundary needed for the top three cheap hypotheses; escalate in place for complex state, remote-only behavior, repeated failure, or budget exhaustion.
-4. Review source routes and trust boundaries before traffic. Test a single hypothesis against `CTF_WEB_BASE_URL` with baseline, changed condition, and negative control.
-5. Keep only decisive requests and responses in Fast mode; redact credentials. Create detailed traces only in Deep/Audit mode.
-6. Avoid broad scanners, unrelated origins, third-party callbacks, and disruptive payloads.
-7. Modify the prepared `work/solve.py` into the shortest reproducible solver. Reproduce the flag path from a clean container state, explain the violated invariant, print the verified flag immediately, and stop.
-
-Return the invariant, minimal reproduction, evidence, source path when known, candidate flag derivation, and limits.
+Compose/Dockerfile이 없으면 STATIC-ONLY로 분석하며, 동적 검증은 work 전용 Docker 격리 안에서만 수행한다.

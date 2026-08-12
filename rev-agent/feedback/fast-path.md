@@ -21,6 +21,13 @@
 - 가장 싼 확인법: 코드에서 파일 매핑 주소와 참조 offset을 찾은 뒤 `xxd -s/-l`, `dd`, address-limited `objdump` 중 하나로 필요한 구간만 본다.
 - 환경/적용 한계: 참조가 동적으로 계산되어 정적 offset을 구할 수 없을 때만 작은 추적기나 격리 실행으로 실제 접근 구간을 확인한다.
 
+## ROP·VM 전체보다 최종 검증식을 먼저 역산하기
+
+- 증상: 고정 주소 ROP chain이나 VM bytecode를 처음부터 끝까지 복원하느라, 실제 flag를 결정하는 짧은 반복 검증 루프를 늦게 발견한다.
+- 재사용 가능한 교훈: 먼저 입력 바이트, 상수 table, modulus·key, 최종 비교값 사이의 데이터 흐름만 추적해 검증기를 식으로 축약한다. 예를 들어 각 바이트가 `input[i] * table[i] mod m == target`을 만족하면 전체 VM을 에뮬레이션하지 않고 modular inverse로 직접 복원할 수 있다.
+- 가장 싼 확인법: 한 바이트에 대해 operand 폭과 signedness, `idiv`의 quotient·remainder 중 실제 비교되는 값을 확인한 뒤 후보를 정방향 식에 다시 넣는다. 한 바이트가 맞으면 동일 식을 전체 bounded 길이에 적용하고 모든 항목의 round-trip을 assertion으로 검증한다.
+- 환경/적용 한계: byte 간 state, carry, 이전 출력 또는 stage 전이가 다음 항에 영향을 주면 독립 역산을 일반화하지 않는다. 이 경우에도 먼저 dependency가 생기는 최소 지점까지만 모델을 확장한다.
+
 ## 검증 payload와 제출 wrapper를 구분하기
 
 - 증상: 역산한 바이트가 프로그램의 수학적 검사를 통과하지만 기록된 `PREFIX{...}` 형식과 다르다는 이유로 올바른 복원식을 실패로 판정한다.

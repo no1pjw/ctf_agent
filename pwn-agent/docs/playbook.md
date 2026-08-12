@@ -22,7 +22,7 @@ Solve independently from challenge inputs, prepared runtime files, local analysi
 5. Avoid GDB until two cheaper tests fail or the exact offset/state remains genuinely ambiguous.
 6. Read `work/intake-exec.txt`. If Docker COPY destinations and service executable references differ, determine the actual entrypoint before treating a local success or failure as representative of the official service.
 
-The launcher neither emits inactivity/wall-clock heartbeat warnings nor terminates an active solve. Adaptive/Fast defaults to `high`; explicit Deep defaults to `ultra`. Externalize progress only when it helps the solve, and never treat missing file writes as proof that the solver is stuck.
+The launcher neither emits inactivity/wall-clock heartbeat warnings nor terminates an active solve. Every mode defaults to reasoning effort `max` with the fast service tier. Externalize progress only when it helps the solve, and never treat missing file writes as proof that the solver is stuck.
 
 ## Bounded gadget discovery
 

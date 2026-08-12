@@ -1,76 +1,39 @@
-# CTF Agent Orchestrator
+# CTF Agent
 
-## User-facing language
+## 출력
 
-Write every user-visible progress update, decision, error explanation, question, and final answer in Korean by default. Preserve commands, code, paths, symbols, flags, protocol tokens, and verbatim diagnostic text in their original form when translation could reduce accuracy.
+- 사용자 출력은 한국어로 한다. 코드·명령·심볼·flag는 원문을 유지한다.
+- 풀이 중 진행 설명을 출력하지 말고 다음 검사를 바로 실행한다. 사용자에게는 검증된 `FLAG=<value>` 또는 진행 불가능한 `BLOCKED=<짧은 이유>`만 보여 준다.
+- 상세 명령·로그·write-up은 `--verbose`, `--audit`, Deep 모드에서만 만든다.
 
-## Learning mode
+## 범위와 격리
 
-When `$ctf-learn` is invoked, do not enter the P0-P6 solve pipeline. Read `learn-agent/skills/ctf-learn/SKILL.md`, review only the completed challenge artifacts needed to extract lessons, and modify only the feedback directory named in the prompt. Do not execute challenge artifacts, contact a target, change core skills/policies/tools, or store challenge-specific answers.
+- 사용자가 제공한 허가된 CTF 문제와 기록된 정확한 endpoint만 다룬다. 다른 호스트, scoreboard, 실제 사용자, 광범위 스캔, DoS, 자동 flag 제출은 금지한다.
+- 입력은 수정하지 않고 checksum을 만들지 않는다. 신뢰할 수 없는 실행 파일은 호스트에서 실행하지 않으며 Docker/sandbox 안에서만 실행한다.
+- 웹 검색, write-up 조회, 서브에이전트는 사용하지 않는다. 외부 네트워크는 금지하며 pwn의 기록된 공식 endpoint와 Web의 기록된 loopback origin만 예외다.
 
-Operate only on CTF challenges, local labs, and systems for which the user has explicit authorization. Treat every supplied host as out of scope until its CTF context and allowed target are recorded in the challenge ledger.
+## 시작
 
-## Startup
+- 런처가 분야를 정했으면 해당 `ctf-pwn`, `ctf-rev`, `ctf-web` Skill 하나만 실행 계약으로 사용한다. 루트 정책·role·playbook·전체 feedback을 다시 읽지 않는다.
+- 런처가 지정한 `input`, `work`, runtime/intake 파일을 권위 있는 경로로 사용한다. 위치를 다시 검색하지 않는다.
+- 수동 미분류 세션에서만 `rules/ruleset.md`로 범위와 분야를 정한다.
+- `$ctf-learn`은 풀이를 재실행하지 않고 지정된 feedback 경로에 일반화된 교훈만 반영한다.
 
-When a launcher already selected a category, its specialist skill is the single execution contract: do not preload `ruleset.md`, role/playbook documents, global notes, or unrelated feedback. Read a longer reference only after a concrete blocker identifies it.
+## 풀이
 
-1. For an unclassified manual session, read `rules/ruleset.md`, `state/notes.md`, and `state/todo.md`.
-2. Create or select `challenges/<challenge-id>/` and record source, category, scope, flag format, artifacts, and network allowance.
-3. Never execute an untrusted artifact outside `sandbox/`. Prefer offline inspection first.
-4. Route work through the phase owners below. A phase may be repeated when evidence changes.
+- 기본은 Fast다: P0-Lite 확인 후 한 번의 bounded probe로 가장 짧은 flag 경로를 고르고 즉시 `work/solve.py` 또는 `work/recover.py`를 만든다.
+- 한 시점에 현재 전략 하나와 근거 있는 fallback 하나만 유지한다. 다음 검사가 명확하면 설명 턴을 만들지 않는다.
+- flag 전에는 write-up, 상세 notes/evidence, 전체 구조 분석을 하지 않는다. checkpoint는 장시간 작업·실제 중단 위험·근거 있는 실패 2회 이후에만 최소 상태로 남긴다.
+- 직접 경로가 두 번 실패하거나 packing/VM/난독화, race/확률성, 환경·프로토콜 불일치가 확인될 때만 같은 세션에서 Deep으로 확장한다. 이미 통과한 분석은 반복하지 않는다.
 
-Adaptive mode is the default for every category: P0-Lite, fixed routing when the launcher already knows the category, a bounded specialist Fast Probe, P5-Lite, and automatic in-place escalation to the full P0-P6 workflow only when a defined trigger fires. `ctf-pwn <challenge-name>`, `ctf-rev <challenge-name>`, and `ctf-web <challenge-name>` implement this for local pwn, reversing, and Web intake. `--fast-only` disables escalation; `--deep` starts full P0-P6; `--audit` adds observability without changing solve rigor.
+## 분야
 
-## Adaptive execution
+- pwn: `pwn-agent/skills/SKILL.md`
+- reversing: `rev-agent/skills/SKILL.md`
+- web: `web-agent/skills/SKILL.md`
+- crypto/forensics: 해당 `references/categories/` 문서를 필요할 때 한 개만 읽는다.
 
-- Always perform P0-Lite: authorization, artifact inventory, and separate target/build/runtime network classes.
-- Skip generic P1 classification when the launcher already selected the category.
-- Bound a Fast Probe to roughly 10 minutes, 8 major tool calls, 3 hypotheses, and 2 failed exploit trials.
-- Launchers do not emit inactivity/wall-clock warnings and must never terminate an active solve. A passed pwn primitive checkpoint must create and immediately advance the solver scaffold; checkpoint summaries preserve invariant, strategy, constraints, and next test.
-- In Fast mode, keep state in the active session and create the solver first. Before a validated flag is printed, do not create, update, or read a write-up; retain only the smallest required checkpoint or private transcript. A concise write-up is post-flag work and is skipped when success short-circuits the session.
-- Escalate without restarting when source is absent, the target is stripped/obfuscated, race/probabilistic behavior appears, environment/protocol remains uncertain, local and official behavior differs, two evidence-bearing exploit trials fail, or the fast budget expires. Heap usage alone is not an escalation trigger when a direct primitive and short flag path are already concrete.
-- Reuse Fast results in Deep mode; never repeat completed discovery only to satisfy phase formatting.
-- For pwn, route all runtime, offline solving, fast-to-remote, and completion details to `pwn-agent/skills/SKILL.md`; do not restate or expand them during startup.
-- For reversing, route static mapping, sandboxed execution, recovery, verification, and completion details to `rev-agent/skills/SKILL.md`. Do not preload its longer docs or feedback index.
-- For Web challenges, inspect and start a supplied Compose file before a standalone Dockerfile. Run a disposable source copy, rebind published ports to loopback, make runtime networks internal, reject unsafe host/device/privileged access, and record the origin in `work/web-runtime.env` before HTTP traffic.
+## 완료
 
-## Shared execution environment
-
-- Docker is available to every category agent and is the default boundary for untrusted executable content.
-- GDB is available to every category agent when native-code debugging is relevant. Run or attach to challenge processes inside the Docker/sandbox boundary, not directly on the host.
-- The local launcher may start Codex with `danger-full-access`; this does not authorize executing untrusted challenge content on the host. Keep such execution inside Docker.
-- Do not calculate, require, or verify SHA-256 checksums during intake, analysis, execution, or reporting.
-
-## Pipeline
-
-| Phase | Owner | Required result |
-|---|---|---|
-| P0 Intake | root orchestrator | Authorization, scope, artifact inventory, network policy |
-| P1 Triage | `.agents/triage-router.md` | Category, confidence, chosen specialist, plan |
-| P2 Static map | specialist | Attack surface, hypotheses, cheapest tests |
-| P3 Solve | specialist | Reproducible candidate solution and evidence |
-| P4 Execute | `.agents/exploit-runner.md` | Sandboxed run log, constraints, repeatability |
-| P5 Verify | `.agents/flag-verifier.md` | Independent flag validation; no guessing |
-| P6 Write-up | `.agents/flag-verifier.md` | Sanitized solution notes and final state |
-
-## Routing
-
-- pwn -> `.agents/pwn-exploiter.md`, `pwn-agent/skills/SKILL.md`
-- reverse engineering -> `.agents/rev-analyst.md`, `rev-agent/skills/SKILL.md`
-- web -> `.agents/web-hacker.md`, `web-agent/skills/SKILL.md`
-- crypto -> `.agents/crypto-breaker.md`, `references/categories/crypto.md`
-- forensics, misc, OSINT, malware, AI/ML -> `.agents/forensics-analyst.md`
-
-## Operating contract
-
-- Keep raw inputs immutable and work on copies. Do not generate checksum records.
-- Default to `work/solve.py` during solving. Create `work/writeup.md` only after the validated flag has already been printed to the user. Create detailed notes, todo, command logs, and evidence packets only in Deep/Audit mode or when a long-running checkpoint is necessary.
-- Separate observed facts, inferences, and hypotheses.
-- Use the smallest test that can falsify a hypothesis.
-- Do not scan unrelated hosts, pivot outside the challenge, contact real users, persist, or cause denial of service.
-- Do not submit a flag or interact with a scoreboard unless the user explicitly asks.
-- Stop and request direction if authorization, scope, destructive impact, or third-party boundaries are unclear.
-
-## Completion gate
-
-Declare solved only when the flag matches the recorded format and is reproduced from documented steps. Keep failed paths in session during Fast mode; persist them only after escalation, at a long-running checkpoint, or when they materially prevent repetition.
+- 재현 가능한 flag가 확인되면 즉시 `FLAG=<value>`를 출력하고 `work/.solved`에 `verified`를 기록한 뒤 추가 도구 호출 없이 끝낸다.
+- 실패 시 확정된 invariant, 마지막 실패 단계, 다음 최저비용 검사만 한 줄로 보고한다.

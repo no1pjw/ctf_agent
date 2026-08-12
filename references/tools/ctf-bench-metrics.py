@@ -89,7 +89,7 @@ def remote_flag_from_event(event: dict[str, Any]) -> str | None:
 
 
 def read_jsonl(path: Path) -> Iterator[dict[str, Any]]:
-    """Stream events so a long xhigh run never loads the JSONL into RAM."""
+    """Stream events so a long max-effort run never loads the JSONL into RAM."""
     if not path.exists():
         return
     with path.open(encoding="utf-8", errors="replace") as stream:
@@ -462,7 +462,7 @@ def command_report(args: argparse.Namespace) -> int:
             "## 고정 설정",
             "",
             "- Model: `gpt-5.6-sol`",
-            "- Reasoning effort: `xhigh`",
+            "- Reasoning effort: `max`",
             "- Service tier: `fast`",
             "- Multi-agent: disabled",
             "- Automatic skill search: disabled",

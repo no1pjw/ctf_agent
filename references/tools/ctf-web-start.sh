@@ -16,6 +16,7 @@ usage() {
   --port PORT       Dockerfile에 EXPOSE가 없을 때 사용할 컨테이너 포트
   --keep-docker     종료 후 Web 컨테이너·Compose 프로젝트를 보존
   --keep-workspace  완료 후에도 중복 입력 파일을 보존
+  --verbose         상세 Codex TUI와 준비 로그 표시(기본: 최종 결과만 출력)
   --prepare-only    문제 파일만 준비하고 서비스와 Codex는 실행하지 않음
   --dry-run         경로·런타임 우선순위·Codex 프롬프트만 표시
   -h, --help        도움말
@@ -31,7 +32,7 @@ usage() {
   CTF_MIN_HOST_FREE_MB Windows 호스트 최소 여유 공간(MiB, 기본 4096)
   CODEX_BIN            Codex CLI 경로
   CTF_CODEX_MODEL      문제 풀이 모델(기본 gpt-5.6-sol)
-  CTF_CODEX_REASONING_EFFORT 추론 강도(기본 Adaptive/Fast=high, Deep=ultra)
+  CTF_CODEX_REASONING_EFFORT 추론 강도(기본 max)
   CTF_CODEX_SERVICE_TIER 서비스 티어(기본 fast)
 EOF
 }
@@ -40,6 +41,7 @@ action=launch
 solve_mode=adaptive
 keep_docker=false
 keep_workspace=false
+quiet_output=true
 source_root=${CTF_WEB_SOURCE:-$HOME/ctf-challenges/web}
 container_port=
 challenge_name=
@@ -62,6 +64,7 @@ while [[ $# -gt 0 ]]; do
     --deep) solve_mode=deep ;;
     --keep-docker) keep_docker=true ;;
     --keep-workspace) keep_workspace=true ;;
+    --verbose) quiet_output=false ;;
     --prepare-only) action=prepare-only ;;
     --dry-run) action=dry-run ;;
     -h|--help) usage; exit 0 ;;
@@ -101,10 +104,8 @@ codex_bin=${CODEX_BIN:-}
 codex_model=${CTF_CODEX_MODEL:-gpt-5.6-sol}
 if [[ -n ${CTF_CODEX_REASONING_EFFORT:-} ]]; then
   codex_reasoning_effort=$CTF_CODEX_REASONING_EFFORT
-elif [[ "$solve_mode" == deep ]]; then
-  codex_reasoning_effort=ultra
 else
-  codex_reasoning_effort=high
+  codex_reasoning_effort=max
 fi
 codex_service_tier=${CTF_CODEX_SERVICE_TIER:-fast}
 image_slug=$(printf '%s' "$challenge_name" | tr '[:upper:]_.' '[:lower:]--')
@@ -149,21 +150,16 @@ runtime_mode=${runtime_detection%%:*}
 runtime_file=${runtime_detection#*:}
 
 case "$solve_mode" in
-  adaptive) mode_text='소스와 실행 환경을 먼저 보고 가장 싼 세 가설만 시험하라. 다중 역할·복잡한 상태·두 가설 실패·환경 불일치가 생길 때만 기존 결과를 유지한 채 Deep으로 전환하라.' ;;
-  fast-only) mode_text='소스 중심 Fast Probe만 수행하라. 라우트·신뢰 경계·세션 상태를 좁게 매핑하고 미해결이면 다음 최저 비용 검증만 보고하라.' ;;
-  deep) mode_text='P0~P6 전체 절차를 수행하되 이미 확인한 라우트와 가설을 반복하지 말고 clean-state 재현까지 완료하라.' ;;
+  adaptive) mode_text='가설은 최대 3개, 근거 있는 실패 2회나 상태·환경 불일치 때만 Deep으로 전환하라.' ;;
+  fast-only) mode_text='직접 flag 경로만 시험하라.' ;;
+  deep) mode_text='확인한 단계를 반복하지 말고 flag 관련 경로만 확장하라.' ;;
 esac
 
 prompt=$(cat <<EOF
 \$ctf-web
-
-허가된 로컬 Web CTF 문제 '$challenge_name'을 즉시 풀어라.
-- 입력: challenges/$challenge_name/input (수정 금지)
-- 실행: mode=$solve_mode, runtime=$runtime_mode, file=$runtime_file
-- 시작: 런처가 Compose를 Dockerfile보다 우선해 이미 빌드·실행했다. work/web-runtime.env를 가장 먼저 읽고 기록된 loopback origin만 사용하라.
-- 분석: $mode_text 소스에서 라우트, 인증·인가, 세션, parser와 sink를 먼저 좁힌 후 baseline, 단일 mutation, negative control 순서로 검증하라.
-- 결과: 준비된 work/solve.py를 최소 재현 코드로 수정하고 간결한 work/writeup.md만 남겨라. 실제 플래그를 재현하면 즉시 FLAG=<값>을 출력하고 work/.solved에 verified를 기록하라.
-- 제한: 한국어로 진행하고 웹 검색·write-up 조회·외부 origin·광범위 스캔·무제한 brute force·DoS·플래그 자동 제출을 금지한다. HTTP 요청은 기록된 localhost origin에만 보낸다.
+허가된 '$challenge_name'을 즉시 풀어라. input=challenges/$challenge_name/input, mode=$solve_mode, runtime=$runtime_mode:$runtime_file.
+web-runtime.env의 loopback origin만 사용해 최단 flag 경로와 최소 work/solve.py만 검증하라. 진행 설명·외부 웹·스캔·brute force·DoS·writeup은 금지한다.
+$mode_text 검증 즉시 FLAG=<값>, .solved=verified 후 종료하고 실패는 BLOCKED=<이유> 한 줄만 출력하라.
 EOF
 )
 
@@ -229,7 +225,7 @@ runtime_file=${runtime_detection#*:}
 printf 'authorization=user-supplied-local-ctf-artifact\ntarget_network=loopback-only\nruntime_mode=%s\nruntime_file=%s\n' \
   "$runtime_mode" "$runtime_file" > "$scope_dir/web-scope.env"
 cp -a --update=none -- "$tools_dir/web-solve-template.py" "$work_dir/solve.py"
-printf 'Web 문제 준비 완료: %s\n' "$challenge_dir"
+[[ "$quiet_output" == true ]] || printf 'Web 문제 준비 완료: %s\n' "$challenge_dir"
 
 [[ "$action" != prepare-only ]] || exit 0
 
@@ -244,7 +240,14 @@ runtime_started=false
 if [[ "$runtime_mode" == compose || "$runtime_mode" == dockerfile ]]; then
   runtime_args=(up --input "$input_dir" --work "$work_dir" --project "$project_name" --image "$image_name")
   [[ -z "$container_port" ]] || runtime_args+=(--port "$container_port")
-  "$runtime_tool" "${runtime_args[@]}"
+  if [[ "$quiet_output" == true ]]; then
+    if ! "$runtime_tool" "${runtime_args[@]}" >/dev/null 2>&1; then
+      printf 'Web runtime 시작에 실패했습니다.\n' >&2
+      exit 70
+    fi
+  else
+    "$runtime_tool" "${runtime_args[@]}"
+  fi
   runtime_started=true
 else
   printf 'Compose/Dockerfile이 없어 STATIC-ONLY 소스 분석으로 계속합니다.\n'
@@ -265,11 +268,19 @@ cleanup_on_exit() {
   local status=$?
   trap - EXIT INT TERM HUP
   if [[ "$runtime_started" == true && "$keep_docker" == false ]]; then
-    printf '\nWeb Docker 리소스 정리 중: %s\n' "$project_name"
-    "$runtime_tool" down --state "$runtime_state" || true
+    [[ "$quiet_output" == true ]] || printf '\nWeb Docker 리소스 정리 중: %s\n' "$project_name"
+    if [[ "$quiet_output" == true ]]; then
+      "$runtime_tool" down --state "$runtime_state" >/dev/null 2>&1 || true
+    else
+      "$runtime_tool" down --state "$runtime_state" || true
+    fi
   fi
   if [[ "$keep_workspace" == false && -f "$work_dir/.solved" && -x "$tools_dir/ctf-clean.sh" ]]; then
-    "$tools_dir/ctf-clean.sh" --apply "$challenge_name" || true
+    if [[ "$quiet_output" == true ]]; then
+      "$tools_dir/ctf-clean.sh" --apply "$challenge_name" >/dev/null 2>&1 || true
+    else
+      "$tools_dir/ctf-clean.sh" --apply "$challenge_name" || true
+    fi
   fi
   exit "$status"
 }
@@ -287,6 +298,24 @@ offline_args=(
 )
 
 set +e
+if [[ "$quiet_output" == true ]]; then
+  printf 'CTF web 시작: %s\n' "$challenge_name"
+  codex_stderr=$(mktemp "${TMPDIR:-/tmp}/ctf-web-${challenge_name}.XXXXXX.log")
+  "$codex_bin" exec --ephemeral --skip-git-repo-check -C "$agent_root" \
+    --model "$codex_model" -c "model_reasoning_effort=\"$codex_reasoning_effort\"" \
+    -c "service_tier=\"$codex_service_tier\"" --enable fast_mode \
+    "${offline_args[@]}" --sandbox danger-full-access -c 'approval_policy="never"' \
+    "$prompt" 2>"$codex_stderr"
+  status=$?
+  if [[ $status -ne 0 ]]; then
+    printf 'Codex 실행 실패(status=%s):\n' "$status" >&2
+    tail -n 20 "$codex_stderr" >&2
+  fi
+  rm -f -- "$codex_stderr"
+  set -e
+  exit "$status"
+fi
+
 "$codex_bin" -C "$agent_root" --model "$codex_model" \
   -c "model_reasoning_effort=\"$codex_reasoning_effort\"" \
   -c "service_tier=\"$codex_service_tier\"" --enable fast_mode \

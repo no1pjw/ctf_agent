@@ -28,14 +28,15 @@ pwn 기본 조작법:
   --remote HOST:PORT  pwn 전용 허가 원격 엔드포인트(정확히 이 주소만 허용)
   --exact-tokens      최종 usage 대기(기본값이며 이전 버전 호환 옵션)
   --no-exact-tokens   플래그 즉시 종료를 우선하고 미도착 토큰은 미집계
-  --extra-prompt      시작 직전에 두 변형에 공통으로 넣을 추가 지시 한 줄 입력
+  --extra-prompt      시작 직전에 두 변형에 넣을 여러 줄 지시 입력(.end로 종료)
+  --verbose           두 변형의 의미 있는 행동 로그 표시(기본: 최종 비교표만 출력)
   --order ORDER       이전 버전 호환 옵션이며 병렬 모드에서는 무시
   --dry-run           실행 경로와 고정 설정만 확인
   -h, --help          도움말
 
 고정된 공정성 설정:
   model               gpt-5.6-sol
-  reasoning effort    xhigh
+  reasoning effort    max
   service tier        fast
   subagents           disabled
   automatic skills    plain disabled; FAST_LOCAL uses the selected category skill
@@ -65,6 +66,7 @@ remote_endpoint=
 dry_run=false
 exact_tokens=true
 ask_extra_prompt=false
+quiet_output=true
 extra_prompt=${CTF_EXTRA_PROMPT:-}
 usage_grace_seconds=${CTF_BENCH_USAGE_GRACE_SECONDS:-45}
 memory_high_mb=${CTF_BENCH_MEMORY_HIGH_MB:-1536}
@@ -93,6 +95,7 @@ while [[ $# -gt 0 ]]; do
     --exact-tokens) exact_tokens=true ;;
     --no-exact-tokens) exact_tokens=false ;;
     --extra-prompt) ask_extra_prompt=true ;;
+    --verbose) quiet_output=false ;;
     --order)
       [[ $# -ge 2 ]] || { echo '--order에는 plain-first 또는 fast-first가 필요합니다.' >&2; exit 64; }
       run_order=$2
@@ -169,7 +172,7 @@ extra_prompt_tool="$script_dir/ctf-extra-prompt.sh"
 codex_bin=${CODEX_BIN:-}
 source_codex_home=${CODEX_HOME:-$HOME/.codex}
 model=gpt-5.6-sol
-reasoning_effort=xhigh
+reasoning_effort=max
 
 if [[ -n "$source_override" ]]; then
   source_path=$source_override
@@ -322,9 +325,9 @@ trim_wsl_free_blocks() {
   command -v sudo >/dev/null 2>&1 || return 0
 
   if sudo -n /usr/sbin/fstrim -av >/dev/null 2>&1; then
-    printf 'WSL 빈 블록 반환: 완료\n'
+    [[ "$quiet_output" == true ]] || printf 'WSL 빈 블록 반환: 완료\n'
   else
-    printf 'WSL 빈 블록 반환: 건너뜀 (fstrim 권한 또는 파일시스템 상태 확인 필요)\n' >&2
+    [[ "$quiet_output" == true ]] || printf 'WSL 빈 블록 반환: 건너뜀 (fstrim 권한 또는 파일시스템 상태 확인 필요)\n' >&2
   fi
 }
 
@@ -419,10 +422,10 @@ cleanup_benchmark_docker_resources() {
   done
 
   if (( removed_containers > 0 || removed_images > 0 )); then
-    printf 'benchmark Docker 정리: containers=%d images=%d\n' "$removed_containers" "$removed_images"
+    [[ "$quiet_output" == true ]] || printf 'benchmark Docker 정리: containers=%d images=%d\n' "$removed_containers" "$removed_images"
   fi
   if [[ -n "$current_shared_image_id" ]]; then
-    printf 'benchmark Docker 캐시 유지: %s\n' "$shared_image"
+    [[ "$quiet_output" == true ]] || printf 'benchmark Docker 캐시 유지: %s\n' "$shared_image"
   fi
 }
 
@@ -462,7 +465,7 @@ prepare_shared_image() {
   local build_status
 
   [[ -f "$input_dir/Dockerfile" ]] || return 0
-  printf '공용 Docker 이미지 준비 중: %s\n' "$shared_image"
+  [[ "$quiet_output" == true ]] || printf '공용 Docker 이미지 준비 중: %s\n' "$shared_image"
   set +e
   # Re-evaluate the current Docker context on every run while allowing Docker
   # to reuse unchanged layers from the stable shared tag.
@@ -471,7 +474,7 @@ prepare_shared_image() {
   set -e
   if [[ $build_status -eq 0 ]] && docker image inspect "$shared_image" >/dev/null 2>&1; then
     shared_image_ready=true
-    printf '공용 Docker 이미지 준비 완료: plain/FAST_LOCAL이 %s를 공유합니다.\n' "$shared_image"
+    [[ "$quiet_output" == true ]] || printf '공용 Docker 이미지 준비 완료: plain/FAST_LOCAL이 %s를 공유합니다.\n' "$shared_image"
   else
     shared_image_ready=false
     printf '공용 Docker 이미지 준비 실패: 정적 분석은 계속합니다. 로그=%s\n' "$log_file" >&2
@@ -611,43 +614,13 @@ case "$category" in
     mkdir -p "$benchmark_codex_home_root/fast_local/skills"
     ln -s "$agent_root/pwn-agent/skills" "$benchmark_codex_home_root/fast_local/skills/ctf-pwn"
     cp -a -- "$agent_root/references/tools/pwntools-template.py" "$fast_work/solve.py"
-    category_fast_rules=$(cat <<'EOF'
-Read work/runtime/runtime.env first. Use supplied libc for remote offsets and an
-exact ready pair for local execution. For incompatible manifests, use the image
-libc/loader pair only for local structural validation and never mix the pairs.
-Use the prepared pwntools template, one narrow source/checksec/symbol probe, and
-one gadget index at most. Every newly local-successful solver version must run
-immediately against the exact recorded endpoint. There is no global attempt
-count, but never replay an unchanged exploit automatically, brute-force, or flood.
-Only after a concrete blocker appears, read the one matching pwn-agent feedback
-entry; do not preload the whole feedback history.
-EOF
-)
+    category_fast_rules='Use the injected ctf-pwn skill, runtime.env, intake, and the prepared solve.py. Read one matching feedback file only after a concrete blocker.'
     ;;
   rev)
     ln -s "$agent_root/rev-agent" "$fast_root/rev-agent"
     mkdir -p "$benchmark_codex_home_root/fast_local/skills"
     ln -s "$agent_root/rev-agent/skills" "$benchmark_codex_home_root/fast_local/skills/ctf-rev"
-    category_fast_rules=$(cat <<'EOF'
-The ctf-rev skill is already injected: never cat SKILL.md. Read
-work/intake-exec.txt directly and do not search for it. Run
-"$CTF_REV_FAST_PROBE" "$CTF_REV_INPUT_DIR" exactly once for initial inspection.
-Treat the artifact as an answer-extraction
-target, not a whole-program-understanding assignment. In one combined probe,
-check strings/resources, success references, compare constants, and the nearest
-validator or decoder, with total output capped at 16 KiB. Test at most two
-cheapest direct flag hypotheses. Never dump or disassemble a whole raw blob;
-recover referenced offsets first and inspect only bounded windows. Inspect
-only the shortest suspected flag slice: do not enumerate all functions, build a
-complete CFG, or broadly decompile while a direct path remains viable. Create
-only the smallest useful recover.py. Execute challenge content only through the
-supplied network-disabled Docker runner. Stop widening the analysis as soon as a
-verified flag path is available. A recorded PREFIX{...} may wrap the program's
-raw accepted payload; try the verified wrapper before rejecting the equation.
-Read one matching feedback entry only after a
-concrete blocker; never preload the full feedback history.
-EOF
-)
+    category_fast_rules='Use the injected ctf-rev skill, intake, one FAST_PROBE, and only the shortest flag slice. Read one matching feedback file only after a concrete blocker.'
     ;;
   web)
     ln -s "$agent_root/web-agent" "$fast_root/web-agent"
@@ -676,69 +649,14 @@ challenges/$challenge_name/work/.solved, make no more tool calls, and finish.
 EOF
 fi
 
-if [[ "$remote_enabled" == true ]]; then
-  task_title="허가된 CTF pwn 문제 '$challenge_name'을 풀어 '$remote_host:$remote_port'에서 플래그를 구하라."
-  remote_rule=$(cat <<EOF
-- 원격은 정확히 TCP $remote_host:$remote_port 한 곳만 허용한다. 스캔, 다른 주소, scoreboard 접속은 금지한다.
-- 정확한 로컬 런타임이 있으면 새 solver가 로컬에서 성공할 때마다 같은 버전을 즉시 원격 실행하라. 고정된 전체 시도 횟수 제한은 없다.
-- 로컬 실행이 불가능하면 정적 교차 확인을 통과한 첫 버전과 이후 실질적으로 수정된 버전을 원격 실행하라. 변경 없는 exploit 자동 반복·무차별 대입·병렬 flood는 금지한다.
-- 문제 바이너리는 호스트에서 실행하지 마라. 직접 작성한 원격 client는 정확한 허가 endpoint에 한해 호스트에서 실행해도 된다.
-- 각 로컬 성공 또는 실질적 수정 직후 문법 검사와 해당 원격 실행을 한 shell command로 결합하라. 하니스가 REMOTE/HOST/PORT 인자를 자동으로 덧붙인다.
-  python3 -m py_compile <solver.py> && "\$CTF_REMOTE_HARNESS" --host "\$CTF_REMOTE_HOST" --port "\$CTF_REMOTE_PORT" --timeout 30 --attempts 1 --output "\$CTF_REMOTE_TRANSCRIPT" -- python3 <solver.py> [필요한 정적 BIN 인자]
-- solver는 실제 원격 응답에서 플래그를 얻었을 때만 \`FLAG=<원문>\` 한 줄을 출력하고 즉시 종료해야 한다.
-- 플래그를 받으면 하니스 출력 직후 모든 검증, writeup, \`.solved\` 작업과 추가 설명을 중단하고 한 줄로 종료하라. 실패하면 원인만 짧게 보고하라.
-EOF
-)
-  plain_execution_rule=$remote_rule
-  fast_execution_rule=$remote_rule
-else
-  task_title="허가된 로컬 CTF $category 문제 '$challenge_name'을 풀어 플래그를 구하라."
-  plain_execution_rule='- 대상 네트워크 접속은 금지한다. challenge 실행은 Docker 격리 안에서만 수행하라.
-- exploit로 플래그를 재현한 경우 work/.solved에 verified 한 줄을 기록하라.'
-  fast_execution_rule="- 대상 네트워크 접속은 금지한다. challenge 실행은 Docker 격리 안에서만 수행하라.
-- exploit로 플래그를 재현한 경우 challenges/$challenge_name/work/.solved에 verified 한 줄을 기록하라."
-fi
-
-case "$category" in
-  pwn) fast_artifact_rule="- 준비된 pwntools 골격 challenges/$challenge_name/work/solve.py를 가장 짧은 문제 전용 exploit으로 수정하라." ;;
-  rev) fast_artifact_rule="- 최소 복원기 또는 solver를 challenges/$challenge_name/work/recover.py에 작성하라." ;;
-  web|crypto|forensics) fast_artifact_rule="- 최소 재현 solver를 challenges/$challenge_name/work/solve.py에 작성하라." ;;
-esac
-
-cat > "$run_root/plain.prompt.txt" <<EOF
-$task_title
-
-- 입력은 input/이다. 원본은 수정하지 마라.
-- 그냥 바로 풀어라. 중간 설명 없이 필요한 명령을 실행하고, CTF 스킬·에이전트·정책 문서를 읽거나 진행 기록과 writeup을 만들지 마라.
-- 필요한 exploit은 work/solve.py에 작성하라. 서브에이전트는 사용하지 마라.
-$plain_execution_rule
-EOF
-
-cat > "$run_root/fast-local.prompt.txt" <<EOF
-$task_title
-
-- 입력은 challenges/$challenge_name/input이다. 원본은 수정하지 마라.
-- 그냥 바로 풀어라. 중간 설명 없이 AGENTS.md의 단일 조사 fast path를 따르고, 막힌 증상과 정확히 맞는 피드백 하나만 필요할 때 확인하라.
-$fast_artifact_rule 서브에이전트는 사용하지 마라.
-$fast_execution_rule
-EOF
-
-# Keep the actual benchmark request deliberately short. Category behavior is
-# supplied by FAST_LOCAL's AGENTS.md; the plain baseline receives only the same
-# authorization, isolation and success contract.
+# Keep the request thin; FAST_LOCAL behavior lives in AGENTS.md and its skill.
 case "$category" in
   pwn) fast_artifact_rule="준비된 challenges/$challenge_name/work/solve.py 골격을 문제 전용 exploit으로 최소 수정하라." ;;
   rev) fast_artifact_rule="최소 복원기 또는 solver를 challenges/$challenge_name/work/recover.py에 작성하라." ;;
   web|crypto|forensics) fast_artifact_rule="최소 재현 solver를 challenges/$challenge_name/work/solve.py에 작성하라." ;;
 esac
 if [[ "$remote_enabled" == true ]]; then
-  common_execution=$(cat <<EOF
-허용된 원격은 TCP $remote_host:$remote_port 하나뿐이다. 다른 주소와 scoreboard에는 접속하지 마라.
-로컬에서 새 exploit 버전이 성공할 때마다 같은 버전을 즉시 원격에 동기화하라. 고정된 총 시도 제한은 없지만 변경 없는 자동 재시도, 무차별 대입, flood는 금지한다.
-각 동기화는 다음 하니스로 1회 실행하라. 실제 원격 응답에서 플래그를 받으면 FLAG=<값>을 출력하고 추가 검증이나 도구 호출 없이 즉시 끝내라.
-python3 -m py_compile <solver.py> && "\$CTF_REMOTE_HARNESS" --host "\$CTF_REMOTE_HOST" --port "\$CTF_REMOTE_PORT" --timeout 30 --attempts 1 --output "\$CTF_REMOTE_TRANSCRIPT" -- python3 <solver.py>
-EOF
-)
+  common_execution="원격은 TCP $remote_host:$remote_port만 허용한다. 새 로컬 성공 또는 실질적 수정 직후 \$CTF_REMOTE_HARNESS로 1회 동기화하고, 실제 원격 FLAG를 받으면 즉시 출력·종료하라. 변경 없는 반복·brute force·flood는 금지한다."
 else
   if [[ "$shared_image_ready" != true ]]; then
     common_execution='외부 네트워크에는 접속하지 마라. 공용 Docker 이미지가 없으므로 STATIC-ONLY로 분석하고 문제 바이너리를 호스트에서 실행하지 마라.'
@@ -749,61 +667,37 @@ fi
 
 if [[ "$category" == pwn ]]; then
   cat > "$run_root/plain.prompt.txt" <<EOF
-허가된 pwn CTF 문제 '$challenge_name'을 문제 파일만 보고 바로 풀어라.
-$authorization_context
-입력은 input/이며 원본을 수정하지 마라. Agent, 스킬, 프로젝트 정책·피드백·참고 문서를 찾거나 읽지 마라.
-Dockerfile, 소스, 바이너리, 제공 libc/ld를 직접 분석하고 필요한 exploit은 work/solve.py에 작성하라.
-$docker_benchmark_rule
-웹 검색, write-up 조회, 서브에이전트, 호스트에서 문제 바이너리 실행, scoreboard 제출은 금지한다.
-$common_execution
+허가된 pwn CTF '$challenge_name'을 input/만 보고 즉시 풀어라. 원본 수정, Agent/문서/웹/서브에이전트/host 실행/제출은 금지한다.
+$authorization_context $docker_benchmark_rule
+최단 exploit을 work/solve.py에 작성하라. $common_execution
+진행 설명 없이 검증 결과만 FLAG=<값> 또는 BLOCKED=<이유>로 출력하라.
 EOF
   cat > "$run_root/fast-local.prompt.txt" <<EOF
 \$ctf-pwn
-
-허가된 pwn CTF 문제 '$challenge_name'을 ctf-pwn과 동일한 구조로 즉시 풀어라.
-$authorization_context
-- 입력: challenges/$challenge_name/input
-- 시작: ctf-pwn 스킬, runtime.env, intake-exec.txt, 비어 있지 않은 state.json만 읽고 바로 짧은 결합 probe를 실행한다. HARD_RULES, role, playbook, ruleset, 전체 feedback index는 선로딩하지 않는다.
-- 모드: adaptive, gpt-5.6-sol xhigh fast. 웹 검색과 write-up 조회, 서브에이전트, 호스트 바이너리 실행, scoreboard 제출은 금지한다.
-- 최우선 결과: 플래그까지 남은 단계가 가장 적은 체인을 선택하라. win/직접 호출/짧은 반환·hook 경로가 있으면 범용 arbitrary-RW·ORW·gadget 체인보다 우선하고, heap이라는 이유만으로 Deep에 들어가지 마라. 같은 분석을 반복하지 말고 solve.py를 가장 빨리 실행하며, writeup과 사전 checkpoint는 생략하라.
-$docker_benchmark_rule
-$common_execution
+허가된 '$challenge_name'을 즉시 풀어라. input=challenges/$challenge_name/input. $authorization_context
+Skill, runtime/intake와 준비된 solve.py만 사용해 최단 flag 체인을 실행하라. $docker_benchmark_rule $common_execution
+진행 설명 없이 검증 결과만 FLAG=<값> 또는 BLOCKED=<이유>로 출력하라.
 EOF
 elif [[ "$category" == rev ]]; then
   cat > "$run_root/plain.prompt.txt" <<EOF
-허가된 로컬 rev CTF 문제 '$challenge_name'을 문제 파일만 보고 바로 풀어라.
-입력은 input/이며 원본을 수정하지 마라. Agent·스킬·정책·피드백·writeup을 찾거나 읽지 마라.
-가장 짧은 검증 가능한 경로를 복원해 work/recover.py에 작성하라. 문제 파일은 호스트에서 실행하지 마라.
-$docker_benchmark_rule
-$common_execution
-검증된 flag를 FLAG=<value>로 먼저 출력하고 work/.solved에 verified를 기록한 뒤 즉시 끝내라.
+허가된 rev CTF '$challenge_name'을 input/만 보고 즉시 풀어라. 원본 수정, Agent/문서/웹/서브에이전트/host 실행은 금지한다.
+최단 복원을 work/recover.py에 작성하라. $docker_benchmark_rule $common_execution
+진행 설명 없이 FLAG=<값>과 .solved=verified 또는 BLOCKED=<이유>만 남기고 종료하라.
 EOF
   cat > "$run_root/fast-local.prompt.txt" <<EOF
 \$ctf-rev
-
-허가된 로컬 rev CTF 문제 '$challenge_name'을 ctf-rev와 같은 구조로 바로 풀어라.
-- 입력: challenges/$challenge_name/input
-- 시작: ctf-rev 스킬은 이미 주입되어 있다. SKILL.md를 다시 열거나 파일을 검색하지 말고 work/intake-exec.txt를 한 번 읽은 뒤 출력 16 KiB 이하의 결합 정적 probe를 실행
-- 최우선 목표: 프로그램 전체 동작 설명이 아니라 가장 짧은 flag 추출. 문자열·리소스·성공 참조·비교 상수·짧은 decoder를 먼저 보고, flag와 직접 연결된 최소 slice만 분석한다. 직접 경로가 살아 있는 동안 전체 CFG·전 함수 decompile·전체 opcode 복원을 하지 않는다.
-- 완료 기준: 재현 가능한 flag를 얻는 순간 분석 범위를 넓히지 말고 즉시 출력·종료한다. recover.py는 필요할 때만 최소 형태로 작성한다.
-- 진행 방식: 다음 검사가 명확하면 판단 설명을 별도 턴으로 출력하지 말고 즉시 실행한다.
-- 모드: adaptive, gpt-5.6-sol xhigh fast; 웹·writeup·서브에이전트·호스트 실행 금지
-$docker_benchmark_rule
-$common_execution
-검증된 flag를 FLAG=<value>로 먼저 출력하고 work/.solved에 verified를 기록한 뒤 즉시 끝내라.
+허가된 '$challenge_name'을 즉시 풀어라. input=challenges/$challenge_name/input.
+Skill, intake와 FAST_PROBE 한 번으로 최단 flag slice만 복원하라. $docker_benchmark_rule $common_execution
+진행 설명 없이 FLAG=<값>과 .solved=verified 또는 BLOCKED=<이유>만 남기고 종료하라.
 EOF
 else
   cat > "$run_root/plain.prompt.txt" <<EOF
-허가된 $category CTF 문제 '$challenge_name'을 그냥 바로 풀어라.
-입력은 input/이며 원본을 수정하지 마라. 웹 검색, writeup 작성, 서브에이전트, 장황한 진행 설명은 사용하지 마라.
-필요한 solver는 work/에 작성하고, 호스트에서 신뢰할 수 없는 문제 파일을 실행하지 마라.
-$common_execution
+허가된 $category CTF '$challenge_name'을 input/만 보고 즉시 풀어라. 원본 수정, 웹, 서브에이전트, host 실행, 진행 설명은 금지한다.
+최소 solver를 work/에 작성하라. $common_execution 결과만 FLAG=<값> 또는 BLOCKED=<이유>로 출력하라.
 EOF
   cat > "$run_root/fast-local.prompt.txt" <<EOF
-허가된 $category CTF 문제 '$challenge_name'을 그냥 바로 풀어라.
-입력은 challenges/$challenge_name/input이며 원본을 수정하지 마라. AGENTS.md의 짧은 fast path만 따르고 웹 검색, writeup 작성, 서브에이전트, 장황한 진행 설명은 사용하지 마라.
-$fast_artifact_rule
-$common_execution
+허가된 $category CTF '$challenge_name'을 즉시 풀어라. input=challenges/$challenge_name/input.
+AGENTS.md의 Fast path와 $fast_artifact_rule $common_execution 진행 설명 없이 FLAG=<값> 또는 BLOCKED=<이유>만 출력하라.
 EOF
 fi
 
@@ -853,6 +747,8 @@ run_variant() {
   local -a runtime_env=()
   local -a launch_prefix=(setsid --wait)
   local -a feature_args=(--disable multi_agent)
+
+  [[ "$quiet_output" == false ]] || capture_options+=(--quiet)
 
   if [[ "$category" == pwn || "$category" == rev ]]; then
     launch_prefix+=(systemd-run --user --scope --quiet --collect \

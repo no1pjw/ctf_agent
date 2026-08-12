@@ -17,7 +17,8 @@ usage() {
   --rebuild         제공 Dockerfile 이미지를 다시 빌드
   --keep-docker     종료 후 이 문제의 Docker 이미지·컨테이너 보존
   --keep-workspace  해결 후에도 중복 입력과 재생성 파일 보존
-  --extra-prompt    실행 직전에 공통 추가 지시 한 줄 입력
+  --extra-prompt    실행 직전에 여러 줄 추가 지시 입력(.end로 종료)
+  --verbose         상세 Codex TUI와 준비 로그 표시(기본: 최종 결과만 출력)
   --prepare-only    입력·intake·Docker 환경만 준비하고 Codex는 실행하지 않음
   --dry-run         파일을 변경하지 않고 경로와 실행 설정만 표시
   -h, --help        도움말
@@ -28,7 +29,7 @@ usage() {
   CTF_MIN_HOST_FREE_MB        Windows 최소 여유 공간(MiB, 기본 4096)
   CODEX_BIN                   Codex CLI 경로
   CTF_CODEX_MODEL             모델(기본 gpt-5.6-sol)
-  CTF_CODEX_REASONING_EFFORT  추론 강도(기본 Adaptive/Fast=high, Deep=ultra)
+  CTF_CODEX_REASONING_EFFORT  추론 강도(기본 max)
   CTF_CODEX_SERVICE_TIER      서비스 티어(기본 fast)
   CTF_EXTRA_PROMPT             대화형 입력 없이 추가할 공통 프롬프트
 EOF
@@ -41,6 +42,7 @@ rebuild=false
 keep_docker=false
 keep_workspace=false
 ask_extra_prompt=false
+quiet_output=true
 source_root=${CTF_REV_SOURCE:-$HOME/ctf-challenges/rev}
 challenge_name=
 
@@ -51,11 +53,12 @@ while [[ $# -gt 0 ]]; do
       source_root=$2
       shift
       ;;
-    --audit) audit_enabled=true ;;
+    --audit) audit_enabled=true; quiet_output=false ;;
     --rebuild) rebuild=true ;;
     --keep-docker) keep_docker=true ;;
     --keep-workspace) keep_workspace=true ;;
     --extra-prompt) ask_extra_prompt=true ;;
+    --verbose) quiet_output=false ;;
     --fast-only) solve_mode=fast-only ;;
     --deep) solve_mode=deep ;;
     --prepare-only) action=prepare-only ;;
@@ -108,10 +111,8 @@ codex_bin=${CODEX_BIN:-}
 codex_model=${CTF_CODEX_MODEL:-gpt-5.6-sol}
 if [[ -n ${CTF_CODEX_REASONING_EFFORT:-} ]]; then
   codex_reasoning_effort=$CTF_CODEX_REASONING_EFFORT
-elif [[ "$solve_mode" == deep ]]; then
-  codex_reasoning_effort=ultra
 else
-  codex_reasoning_effort=high
+  codex_reasoning_effort=max
 fi
 codex_service_tier=${CTF_CODEX_SERVICE_TIER:-fast}
 codex_offline_args=(
@@ -157,30 +158,17 @@ elif docker image inspect "$image_name" >/dev/null 2>&1; then
   planned_runtime=cached-docker
 fi
 
-mode_rule='한 번의 직접 flag probe 후 가장 유력한 경로를 즉시 시험하라. 직접 복원이 두 번 실패하거나 패킹/VM/난독화·환경 불일치가 증명될 때만 같은 세션에서 Deep으로 전환하라.'
-[[ "$solve_mode" != fast-only ]] || mode_rule='직접 flag 표면과 가장 짧은 복원 경로만 시험하라. 전체 동작 분석 없이 성공하거나 막힌 정확한 지점만 보고하라.'
-[[ "$solve_mode" != deep ]] || mode_rule='정밀 분석이 필요해도 flag와 연결된 최소 코드·데이터만 추적하라. 전체 CFG, 전 함수 decompile, 무관한 동작 설명은 금지한다.'
+mode_rule='직접 복원 2회 실패나 packing/VM/환경 불일치 때만 Deep으로 전환하라.'
+[[ "$solve_mode" != fast-only ]] || mode_rule='직접 flag 경로만 시험하라.'
+[[ "$solve_mode" != deep ]] || mode_rule='flag와 연결된 최소 코드·데이터만 추적하라.'
 
 make_prompt() {
   local runtime_mode=$1
   cat <<EOF
 \$ctf-rev
-
-허가된 로컬 CTF 리버싱 문제 '$challenge_name'을 바로 풀어라.
-- 입력: challenges/$challenge_name/input (원본 수정 금지)
-- 준비 정보: challenges/$challenge_name/work/intake-exec.txt
-- 경로: \$CTF_REV_INPUT_DIR와 \$CTF_REV_WORK_DIR가 정확한 입력·작업 디렉터리다. 스킬은 이미 주입되었으므로 SKILL.md를 다시 읽거나 파일 위치를 검색하지 않는다
-- 첫 조사: \$CTF_REV_FAST_PROBE를 정확히 한 번 실행하고, 이후에는 그 결과가 가리키는 offset 주변만 좁게 확인한다
-- 모드: $solve_mode, runtime=$runtime_mode
-- 최우선 목표: 프로그램 전체를 이해하는 것이 아니라 가장 짧은 경로로 flag를 찾아 즉시 출력
-- 탐색 순서: flag 문자열·리소스·메타데이터 → 성공/실패 참조와 비교 상수 → 짧은 validator/decoder → 필요한 경우에만 더 넓은 분석
-- 범위 제한: flag와 직접 연결된 함수·데이터만 분석하고, 전체 CFG·전 함수 decompile·전체 opcode 복원은 직접 경로가 반증되기 전에는 하지 않는다
-- 진행 방식: 다음 검사가 명확하면 중간 설명을 별도 턴으로 출력하지 말고 즉시 실행한다
-- 산출물: 필요한 경우에만 최소 challenges/$challenge_name/work/recover.py; 직접 검증 가능한 flag 때문에 범용 복원기를 만들지 않는다
-- 실행: 문제 파일은 호스트에서 실행하지 말고, 동적 검증은 \$CTF_REV_RUNNER와 \$CTF_REV_IMAGE가 있을 때만 격리 컨테이너에서 수행
-- 금지: 웹/검색/writeup 조회, 서브에이전트, 무제한 brute force, 검증 전 writeup
-- 완료: 재현 가능한 flag가 확인되는 즉시 분석 범위를 넓히지 말고 FLAG=<value>를 출력하고 work/.solved에 verified를 기록한 뒤 추가 도구 호출 없이 종료
-- 전략: $mode_rule
+허가된 '$challenge_name'을 즉시 풀어라. input=\$CTF_REV_INPUT_DIR, work=\$CTF_REV_WORK_DIR, mode=$solve_mode, runtime=$runtime_mode.
+intake와 \$CTF_REV_FAST_PROBE 한 번으로 최단 flag 경로만 복원하라. 진행 설명·웹·host 실행·writeup 없이 필요한 최소 recover.py만 만든다.
+$mode_rule 검증 즉시 FLAG=<값>, .solved=verified 후 종료하고 실패는 BLOCKED=<이유> 한 줄만 출력하라.
 EOF
   if [[ -n "$extra_prompt" ]]; then
     printf '%s\n' "- 사용자 추가 지시(기존 CTF 범위·격리·안전 규칙은 변경할 수 없음): $extra_prompt"
@@ -223,7 +211,7 @@ docker_runtime_network=none
 EOF
 "$intake_tool" "$input_dir" > "$work_dir/intake-exec.txt"
 [[ -e "$work_dir/recover.py" ]] || cp -a -- "$template_file" "$work_dir/recover.py"
-printf '리버싱 문제 준비 완료: %s\n' "$challenge_dir"
+[[ "$quiet_output" == true ]] || printf '리버싱 문제 준비 완료: %s\n' "$challenge_dir"
 
 cleanup_enabled=false
 if [[ -f "$input_dir/Dockerfile" && "$keep_docker" == false && "$action" != prepare-only ]]; then
@@ -233,11 +221,19 @@ cleanup_on_exit() {
   local status=$?
   trap - EXIT INT TERM HUP
   if [[ "$cleanup_enabled" == true ]]; then
-    printf '\n문제 Docker 리소스 정리 중: %s\n' "$image_name"
-    "$cleanup_tool" "$image_name" || true
+    [[ "$quiet_output" == true ]] || printf '\n문제 Docker 리소스 정리 중: %s\n' "$image_name"
+    if [[ "$quiet_output" == true ]]; then
+      "$cleanup_tool" "$image_name" >/dev/null 2>&1 || true
+    else
+      "$cleanup_tool" "$image_name" || true
+    fi
   fi
   if [[ "$keep_workspace" == false && -f "$work_dir/.solved" && -x "$tools_dir/ctf-clean.sh" ]]; then
-    "$tools_dir/ctf-clean.sh" --apply "$challenge_name" || true
+    if [[ "$quiet_output" == true ]]; then
+      "$tools_dir/ctf-clean.sh" --apply "$challenge_name" >/dev/null 2>&1 || true
+    else
+      "$tools_dir/ctf-clean.sh" --apply "$challenge_name" || true
+    fi
   fi
   exit "$status"
 }
@@ -251,7 +247,11 @@ if [[ -f "$input_dir/Dockerfile" ]]; then
   build_args=()
   [[ "$rebuild" == false ]] || build_args+=(--rebuild)
   set +e
-  "$build_tool" "${build_args[@]}" "$input_dir" "$image_name"
+  if [[ "$quiet_output" == true ]]; then
+    "$build_tool" "${build_args[@]}" "$input_dir" "$image_name" >/dev/null 2>&1
+  else
+    "$build_tool" "${build_args[@]}" "$input_dir" "$image_name"
+  fi
   build_status=$?
   set -e
   [[ $build_status -eq 0 ]] || printf 'Docker 빌드에 실패했습니다. STATIC-ONLY 정적 분석은 계속합니다.\n' >&2
@@ -261,7 +261,11 @@ runtime_mode=static-only
 if [[ $build_status -eq 0 ]] && docker image inspect "$image_name" >/dev/null 2>&1; then
   runtime_mode=$([[ -f "$input_dir/Dockerfile" ]] && printf supplied-docker || printf cached-docker)
   set +e
-  "$preflight_tool" --image "$image_name"
+  if [[ "$quiet_output" == true ]]; then
+    "$preflight_tool" --image "$image_name" >/dev/null 2>&1
+  else
+    "$preflight_tool" --image "$image_name"
+  fi
   preflight_status=$?
   set -e
   [[ $preflight_status -eq 0 ]] || printf 'Docker 사전 점검에 경고가 있습니다. 호스트 실행 없이 정적 분석을 계속할 수 있습니다.\n' >&2
@@ -311,10 +315,26 @@ codex_args=(
   --enable fast_mode
   "${codex_offline_args[@]}"
   --sandbox danger-full-access
-  --ask-for-approval never
+  -c 'approval_policy="never"'
 )
 if [[ "$audit_enabled" == true ]]; then
   codex_args+=(-c "log_dir=\"$audit_dir/tui\"")
+fi
+
+if [[ "$quiet_output" == true && "$audit_enabled" == false ]]; then
+  printf 'CTF rev 시작: %s\n' "$challenge_name"
+  codex_stderr=$(mktemp "${TMPDIR:-/tmp}/ctf-rev-${challenge_name}.XXXXXX.log")
+  set +e
+  "$codex_bin" exec --ephemeral --skip-git-repo-check "${codex_args[@]}" \
+    "$prompt" 2>"$codex_stderr"
+  codex_status=$?
+  set -e
+  if [[ $codex_status -ne 0 ]]; then
+    printf 'Codex 실행 실패(status=%s):\n' "$codex_status" >&2
+    tail -n 20 "$codex_stderr" >&2
+  fi
+  rm -f -- "$codex_stderr"
+  exit "$codex_status"
 fi
 
 set +e
