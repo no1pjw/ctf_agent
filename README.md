@@ -51,6 +51,8 @@ ctf-rev --prepare-only --source /path/to/reversing challenge-name
 ctf-web --source /path/to/web challenge-name
 ctf-web --verbose --source /path/to/web challenge-name
 ctf-web --source /path/to/web --port 8080 challenge-name
+ctf-web challenge-name https://challenge.example:8443/
+ctf-web --extra-prompt challenge-name https://challenge.example:8443/
 ctf-bench-pwn --source /path/to/pwn challenge-name
 ctf-bench-pwn --verbose challenge-name host.example:31337
 ctf-bench-pwn --extra-prompt challenge-name host.example:31337
@@ -103,11 +105,15 @@ Pwn 벤치는 현재 `ctf-pwn`과 같은 런타임 준비 과정을 먼저 수�
 
 `ctf-bench-rev`는 plain Codex와 FAST_LOCAL을 `gpt-5.6-sol`, `max`, fast service tier로 병렬 실행합니다. plain에는 문제 파일과 동일한 격리 실행 수단만 제공하고 Agent·스킬·피드백은 차단합니다. FAST_LOCAL에는 실제 `ctf-rev`의 루트 `AGENTS.md`, `$ctf-rev` 스킬, rev 피드백, intake와 복원기 골격을 제공합니다. Dockerfile은 한 번만 빌드하여 두 변형이 같은 불변 이미지를 공유하되, 실행 컨테이너와 작업공간은 서로 분리합니다. 두 실행 모두 기본 `MemoryHigh=1536MiB`, `MemoryMax=2048MiB` 제한을 적용하며 검증된 flag와 `.solved`를 성공 기준으로 동일하게 비교합니다.
 
-`ctf-web`은 제공된 Compose 파일(`compose.yaml`, `compose.yml`, `docker-compose.yml`, `docker-compose.yaml`)을 가장 먼저 사용하고, 없으면 `Dockerfile`을 빌드해 Web 서비스를 Codex보다 먼저 시작합니다. Compose는 disposable 소스 복사본에서 실행하며, 포트를 `127.0.0.1`의 임의 포트로 다시 묶고 runtime Docker 네트워크를 internal로 바꿉니다. privileged/host namespace/device/external network 및 작업 복사본 밖 bind mount는 거부합니다. 실행 origin은 `work/web-runtime.env`와 `CTF_WEB_BASE_URL`에 기록되고, Codex는 이 origin에만 HTTP 요청을 보냅니다. Dockerfile에 `EXPOSE`가 없으면 `--port`로 컨테이너 포트를 지정합니다. 종료 시 해당 Compose 프로젝트·볼륨·로컬 이미지 또는 단일 컨테이너·네트워크·이미지만 정리하며 `--keep-docker`로 보존할 수 있습니다.
+`ctf-web`은 white-box와 black-box Web CTF를 모두 지원합니다. 제공된 Compose 파일(`compose.yaml`, `compose.yml`, `docker-compose.yml`, `docker-compose.yaml`)을 가장 먼저 사용하고, 없으면 `Dockerfile`을 빌드해 서비스를 Codex보다 먼저 시작합니다. 원격 URL을 함께 주면 로컬에서 검증한 최소 solver를 같은 원격 문제에 즉시 재생하며, 소스나 Docker가 없어도 정확히 기록된 HTTP(S) origin에서 저소음 black-box 풀이를 계속합니다. 첫 응답에서 forms·scripts·same-origin links·endpoint hints를 추출한 뒤 관찰된 경로만 baseline/단일 mutation 방식으로 시험하며, 서브도메인·포트 스캔, 일반 wordlist, 외부 callback과 write-up 검색은 사용하지 않습니다.
+
+Compose는 disposable 소스 복사본에서 실행하며 포트를 `127.0.0.1`의 임의 포트로 다시 묶고 runtime Docker 네트워크를 internal로 바꿉니다. privileged/host namespace/device/external network 및 작업 복사본 밖 bind mount는 거부합니다. 로컬/원격 scope는 `work/web-runtime.env`, `scope/web-scope.env`, `CTF_WEB_TARGET_URL`, `CTF_WEB_SCOPE_ORIGIN`에 기록됩니다. 종료 시 해당 Compose 프로젝트·볼륨·로컬 이미지 또는 단일 컨테이너·네트워크·이미지만 정리하며 `--keep-docker`로 보존할 수 있습니다.
 
 ```bash
 ctf-web --source /path/to/web challenge-name
 ctf-web --source /path/to/web --port 8080 challenge-name
+ctf-web challenge-name https://challenge.example:8443/
+ctf-web --source /path/to/web challenge-name https://challenge.example:8443/
 ctf-web --deep --keep-docker --source /path/to/web challenge-name
 ```
 

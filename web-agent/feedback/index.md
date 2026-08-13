@@ -4,4 +4,4 @@ Fast Probe 중에는 이 색인만 확인한다. 증상과 일치하는 주제 �
 
 - `failures.md`: 거부된 취약점 가설과 baseline/control 증거
 - `long-running.md`: 로컬 fuzzing과 장시간 테스트 제한
-
+- `url-normalization.md`: percent-encoding, 다중 디코딩, canonicalization 계층 불일치

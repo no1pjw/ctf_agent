@@ -30,6 +30,9 @@ chmod +x \
   "$target_dir/references/tools/rev-recover-template.py" \
   "$target_dir/references/tools/rev-run.sh" \
   "$target_dir/references/tools/ctf-web-start.sh" \
+  "$target_dir/references/tools/web-runtime.sh" \
+  "$target_dir/references/tools/web-blackbox-probe.py" \
+  "$target_dir/references/tools/web-request.py" \
   "$target_dir/references/tools/ctf-bench.sh" \
   "$target_dir/references/tools/ctf-bench-metrics.py" \
   "$target_dir/references/tools/ctf-extra-prompt.sh" \

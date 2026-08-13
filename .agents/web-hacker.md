@@ -1,7 +1,7 @@
 # Web Hacker (P3)
 
-Read `web-agent/skills/SKILL.md`, the active challenge ledger, and the exact allowed origin.
+Read `web-agent/skills/SKILL.md` and `scope/web-scope.env`.
 
-Read `work/web-runtime.env` first. Prefer the sanitized supplied Compose deployment, then the supplied Dockerfile, and never start the service on the host. In the bounded Fast Probe, map only the source routes, trust boundary, identity state, and parser needed for the top three cheap hypotheses. Test one hypothesis at a time against the recorded loopback origin with a baseline and negative control. Escalate in place for multi-role/stateful chains, protocol ambiguity, environment mismatch, two failed exploit attempts, or budget exhaustion. Retain only decisive request/response evidence unless Audit mode is active.
+Prefer the launcher-prepared Compose/Docker service when present, then replay the working solver at the exact remote URL. For black-box tasks, request the recorded entry URL once and map only observed same-origin routes, parameters, sessions, and state. Test at most three cheap hypotheses with a baseline and one mutation; add a negative control only when needed. Escalate for multi-role/state chains, protocol ambiguity, environment mismatch, or two evidence-backed failures. Retain only decisive private request/response evidence unless Audit mode is active.
 
-Return the vulnerable invariant, minimal reproduction, impact within the challenge, source location when known, and a handoff for verification. Do not scan adjacent hosts or attack third parties.
+Return the minimal reproduction and flag. Do not scan adjacent hosts, search write-ups, or attack third parties.

@@ -115,6 +115,7 @@ service_copy="$work_real/service"
 
 if [[ -f "$state_file" ]]; then
   runtime_down "$state_file"
+  rm -f -- "$state_file"
 fi
 rm -rf -- "$service_copy"
 mkdir -p "$service_copy"
@@ -281,6 +282,37 @@ else
   echo 'No compose.yaml, compose.yml, docker-compose.yml, docker-compose.yaml, or Dockerfile was found.' >&2
   exit 67
 fi
+
+[[ -n "$endpoint" ]] || {
+  echo 'The Web runtime exposed no loopback HTTP endpoint.' >&2
+  exit 70
+}
+python3 - "$endpoint" <<'PY'
+import sys, time
+from urllib.error import HTTPError
+from urllib.request import HTTPRedirectHandler, build_opener
+
+class NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+url = sys.argv[1]
+opener = build_opener(NoRedirect)
+deadline = time.monotonic() + 30
+last = None
+while time.monotonic() < deadline:
+    try:
+        with opener.open(url, timeout=2) as response:
+            response.read(1)
+        break
+    except HTTPError:
+        break
+    except Exception as exc:
+        last = exc
+        time.sleep(0.25)
+else:
+    raise SystemExit(f"Web runtime did not become ready within 30s: {last}")
+PY
 
 {
   write_env runtime_status running
