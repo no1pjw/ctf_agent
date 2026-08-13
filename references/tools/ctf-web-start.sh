@@ -146,6 +146,7 @@ work_dir="$challenge_dir/work"
 scope_dir="$challenge_dir/scope"
 evidence_dir="$challenge_dir/evidence/private"
 tools_dir="$agent_root/references/tools"
+elapsed_timer_tool="$tools_dir/ctf-elapsed-timer.sh"
 runtime_tool="$tools_dir/web-runtime.sh"
 runtime_state="$work_dir/web-runtime.env"
 extra_prompt_tool="$tools_dir/ctf-extra-prompt.sh"
@@ -173,6 +174,8 @@ project_name="ctf_web_${image_slug//-/_}"
 }
 [[ "$codex_reasoning_effort" =~ ^(low|medium|high|xhigh|max|ultra)$ ]] || { echo '잘못된 추론 강도입니다.' >&2; exit 65; }
 [[ "$codex_service_tier" =~ ^[A-Za-z0-9._-]+$ ]] || { echo '잘못된 서비스 티어입니다.' >&2; exit 65; }
+[[ -r "$elapsed_timer_tool" ]] || { printf '경과시간 도구가 없습니다: %s\n' "$elapsed_timer_tool" >&2; exit 66; }
+source "$elapsed_timer_tool"
 
 if [[ "$ask_extra_prompt" == true ]]; then
   extra_prompt=$("$extra_prompt_tool" --interactive)
@@ -377,6 +380,7 @@ export CTF_WEB_REQUEST="$tools_dir/web-request.py"
 cleanup_on_exit() {
   local status=$?
   trap - EXIT INT TERM HUP
+  ctf_elapsed_stop
   if [[ "$runtime_started" == true && "$keep_docker" == false ]]; then
     [[ "$quiet_output" == true ]] || printf '\nWeb Docker 리소스 정리 중: %s\n' "$project_name"
     if [[ "$quiet_output" == true ]]; then
@@ -409,7 +413,7 @@ offline_args=(
 
 set +e
 if [[ "$quiet_output" == true ]]; then
-  printf 'CTF web 시작: %s\n' "$challenge_name"
+  ctf_elapsed_start "CTF web 실행 중: $challenge_name"
   codex_stderr=$(mktemp "${TMPDIR:-/tmp}/ctf-web-${challenge_name}.XXXXXX.log")
   "$codex_bin" exec --ephemeral --skip-git-repo-check -C "$agent_root" \
     --model "$codex_model" -c "model_reasoning_effort=\"$codex_reasoning_effort\"" \
@@ -417,6 +421,7 @@ if [[ "$quiet_output" == true ]]; then
     "${offline_args[@]}" --sandbox danger-full-access -c 'approval_policy="never"' \
     "$prompt" 2>"$codex_stderr"
   status=$?
+  ctf_elapsed_stop
   if [[ $status -ne 0 ]]; then
     printf 'Codex 실행 실패(status=%s):\n' "$status" >&2
     tail -n 20 "$codex_stderr" >&2

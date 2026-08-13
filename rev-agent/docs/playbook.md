@@ -10,4 +10,4 @@ Read this only after a concrete blocker or Deep-mode escalation.
 6. Encode the recovered transformation or constraint model in the smallest useful `work/recover.py`.
 7. Use bounded container execution only to answer a written question that static evidence cannot settle.
 8. Verify with an independent implementation or one positive sandboxed run; use a negative control only when ambiguity remains.
-9. Print the verified flag before any documentation and stop.
+9. Treat official-validator success as terminal. In that same tool call, invoke `$CTF_REV_FLAG_SUCCESS '<flag>'` last, then make no more tool calls.

@@ -70,15 +70,17 @@ ctf-clean
 ctf-clean --caches --apply
 ```
 
-`ctf-pwn`, `ctf-rev`, `ctf-bench-pwn`, `ctf-bench-rev`에 `--extra-prompt`를 지정하면 여러 줄 지시를 입력할 수 있습니다. 붙여넣기가 끝나면 새 줄에 `.end`를 입력하거나 `Ctrl+D`로 종료하며, 생략하려면 바로 `.end`를 입력합니다. 벤치마크에서는 전체 문장을 plain과 FAST_LOCAL 양쪽에 동일하게 전달하고 실행별 prompt 파일에도 보존합니다. 자동화에서는 줄바꿈이 포함된 `CTF_EXTRA_PROMPT` 환경 변수를 사용할 수 있습니다. 추가 지시는 기존 CTF 범위·격리·안전 규칙을 완화할 수 없습니다.
+`ctf-pwn`, `ctf-rev`, `ctf-bench-pwn`, `ctf-bench-rev`에 `--extra-prompt`를 지정하면 여러 줄 지시를 입력할 수 있습니다. 붙여넣기가 끝나면 새 줄에 `.end`를 입력하거나 `Ctrl+D`로 종료하며, 생략하려면 바로 `.end`를 입력합니다. 벤치마크에서는 전체 문장을 LUNA·TERRA·SOL 세 모델에 동일하게 전달하고 실행별 prompt 파일에도 보존합니다. 자동화에서는 줄바꿈이 포함된 `CTF_EXTRA_PROMPT` 환경 변수를 사용할 수 있습니다. 추가 지시는 기존 CTF 범위·격리·안전 규칙을 완화할 수 없습니다.
 
-`ctf-pwn`, `ctf-rev`, `ctf-web`은 기본적으로 비대화형 quiet 실행을 사용해 시작 한 줄과 최종 `FLAG=`/`BLOCKED=` 결과만 표시합니다. Codex의 도구 호출과 준비 과정 로그를 직접 봐야 할 때만 `--verbose`를 지정합니다. `ctf-bench-*`도 기본 quiet이며 `--verbose`에서만 두 변형의 중간 행동을 표시합니다.
+`ctf-pwn`, `ctf-rev`, `ctf-web`은 기본적으로 비대화형 quiet 실행을 사용해 시작 한 줄과 최종 `FLAG=`/`BLOCKED=` 결과만 표시합니다. Codex의 도구 호출과 준비 과정 로그를 직접 봐야 할 때만 `--verbose`를 지정합니다. `ctf-bench-*`는 경쟁 진행을 확인할 수 있도록 세 모델의 의미 있는 행동 로그를 기본 표시하며, `CTF_BENCH_QUIET=true`로 최종 표만 남길 수 있습니다.
 
 `ctf-learn-pwn`, `ctf-learn-rev`, `ctf-learn-web`은 분야가 명령 이름에 고정된 학습 명령입니다. 각각 `pwn-agent/feedback`, `rev-agent/feedback`, `web-agent/feedback`만 수정하며 `--category`로 다른 분야에 우회할 수 없습니다. 기존 `ctf-learn --category <분야> 문제명`도 계속 사용할 수 있습니다.
 
 ## 벤치마크
 
-`ctf-bench-pwn <문제 이름> <HOST:PORT>`는 같은 문제를 `plain Codex`와 `FAST_LOCAL`에서 동시에 실행합니다. 둘 다 `gpt-5.6-sol`, `max`, fast service tier를 사용합니다. plain은 인증만 연결한 빈 `CODEX_HOME`과 문제 파일만 받고 Agent·스킬·정책·피드백을 전혀 받지 않습니다. FAST_LOCAL은 실제 `ctf-pwn`과 같은 루트 `AGENTS.md`, `$ctf-pwn` 스킬, pwn 역할·피드백, intake, checkpoint, libc/ld runtime 준비를 사용합니다. Dockerfile은 벤치마크가 한 번만 빌드하며 두 변형에는 같은 불변 이미지를 제공합니다. 실제 실행은 공통 제한 하니스가 변형마다 별도의 일회용 `--rm` 컨테이너를 생성하므로 프로세스·파일·입력 상태가 섞이지 않습니다. 전체 JSONL은 파일에 보존하지만 터미널은 기본적으로 시작 한 줄과 최종 비교표만 표시합니다. 중간 행동 로그가 필요할 때만 `--verbose`를 지정합니다.
+벤치마크는 더 이상 plain/FAST_LOCAL 순차 비교가 아니라 LUNA·TERRA·SOL max 모델의 병렬 경쟁입니다. 첫 플래그 포착 시 승자와 플래그를 즉시 출력하고 나머지 모델을 중단합니다. 토큰 수는 플래그 직전까지 도착한 `turn.completed.usage`만 집계되며, 조기 종료로 usage가 없으면 `미집계`로 표시합니다.
+
+`ctf-bench-pwn <문제 이름> <HOST:PORT>`는 같은 문제를 `gpt-5.6-luna`, `gpt-5.6-terra`, `gpt-5.6-sol` 세 모델로 동시에 실행합니다. 모두 `max` 추론 강도와 fast service tier, 동일한 ctf Agent·skill·feedback 컨텍스트를 사용합니다. 문제 입력과 공용 Docker 이미지·libc/ld 런타임은 동일하게 제공하지만 작업공간·Codex 홈·실행 컨테이너는 모델별로 격리합니다. 셋 중 하나가 명시적인 로컬 `FLAG=` 또는 원격 하니스 플래그를 포착하면 해당 모델을 승자로 즉시 로그에 출력하고 나머지 Codex 프로세스 그룹을 종료합니다. 전체 JSONL은 파일에 보존하고, 터미널에는 기본적으로 시작·승자·최종 비교표만 표시하며 중간 행동 로그는 `--verbose`에서만 표시합니다.
 
 각 Codex 실행은 systemd memory scope에서 기본 `MemoryHigh=1536MiB`, `MemoryMax=2048MiB`, `MemorySwapMax=512MiB`로 제한됩니다. JSONL 집계도 전체 파일을 메모리에 올리지 않고 스트리밍하므로 긴 max-effort 실행에서 메모리가 수 GB까지 증가하는 현상을 막습니다. 필요할 때만 `CTF_BENCH_MEMORY_HIGH_MB`와 `CTF_BENCH_MEMORY_MAX_MB`로 조정합니다.
 
@@ -99,11 +101,11 @@ ctf-bench-pwn --timeout 2400 challenge-name
 
 Pwn 벤치는 현재 `ctf-pwn`과 같은 런타임 준비 과정을 먼저 수행합니다. 제공 libc/ld를 우선 사용하고, 누락되면 정확한 Docker 이미지에서 추출하며, 제공 libc가 이미지 libc와 다르면 원격 계산용 제공 libc와 로컬 구조 검증용 이미지 libc/ld를 섞지 않고 분리합니다. 새 solver 버전이 로컬에서 성공할 때마다 즉시 같은 버전을 정확한 원격 주소에 동기화합니다. 고정된 총 시도 제한은 없지만 변경 없는 자동 반복·무차별 대입·flood는 금지합니다. 하니스가 실제 원격 플래그를 포착하는 순간 성공으로 기록하고 재검증·writeup·`.solved` 판정 없이 종료합니다. `--remote`는 pwn 벤치에서만 사용할 수 있습니다.
 
-결과는 `benchmarks/runs/<category>/<run-id>/report.md`와 각 실행의 JSONL 이벤트에 남습니다. 기본 제한 시간은 `0`, 즉 풀이 중 자동 종료 없음이며 사용자가 `--timeout`을 준 경우만 제한합니다. 원격 플래그 시각은 즉시 성공 시각으로 고정하고 추가 도구 실행을 허용하지 않지만, 정확한 토큰 비교를 위해 기본적으로 최종 `turn.completed.usage`만 최대 45초 기다립니다. usage가 오지 않으면 토큰을 거짓 `0` 대신 `미집계`로 표시합니다. 플래그 포착 즉시 프로세스를 끝내려면 `--no-exact-tokens`를 사용합니다. `ctf-bench-pwn --dry-run challenge-name`처럼 모델 호출 없이 분야·설정·범위를 먼저 확인할 수 있습니다.
+결과는 `benchmarks/runs/<category>/<run-id>/report.md`와 각 실행의 JSONL 이벤트에 남습니다. 기본 제한 시간은 `0`, 즉 풀이 중 자동 종료 없음이며 사용자가 `--timeout`을 준 경우만 제한합니다. 경쟁 모드에서는 플래그 포착 시각을 즉시 성공 시각으로 고정하고 추가 도구 실행을 허용하지 않으며, 나머지 모델 프로세스도 즉시 종료합니다. 조기 종료로 usage가 도착하지 않으면 토큰을 거짓 `0` 대신 `미집계`로 표시합니다. `ctf-bench-pwn --dry-run challenge-name`처럼 모델 호출 없이 분야·설정·범위를 먼저 확인할 수 있습니다.
 
 `ctf-rev`는 입력을 복사한 뒤 실행 없이 형식·아키텍처·런타임 후보를 `work/intake-exec.txt`에 기록하고, 가장 짧은 복원 경로를 `work/recover.py`에 구현합니다. 제공된 Dockerfile은 Codex 시작 전에 한 번 빌드하며, rev 전용 runner가 입력을 `/ctf-input`에 읽기 전용으로 마운트하여 네트워크가 차단된 일회용 컨테이너에서만 동적 검증합니다. Dockerfile과 정확한 캐시 이미지가 없거나 빌드가 실패하면 호스트 실행 없이 STATIC-ONLY로 계속합니다. 기본 원본 경로는 `$HOME/ctf-challenges/rev`이며 다른 위치는 `--source` 또는 `CTF_REV_SOURCE`로 지정합니다. 검증된 flag는 문서 작업보다 먼저 출력하고 즉시 종료합니다.
 
-`ctf-bench-rev`는 plain Codex와 FAST_LOCAL을 `gpt-5.6-sol`, `max`, fast service tier로 병렬 실행합니다. plain에는 문제 파일과 동일한 격리 실행 수단만 제공하고 Agent·스킬·피드백은 차단합니다. FAST_LOCAL에는 실제 `ctf-rev`의 루트 `AGENTS.md`, `$ctf-rev` 스킬, rev 피드백, intake와 복원기 골격을 제공합니다. Dockerfile은 한 번만 빌드하여 두 변형이 같은 불변 이미지를 공유하되, 실행 컨테이너와 작업공간은 서로 분리합니다. 두 실행 모두 기본 `MemoryHigh=1536MiB`, `MemoryMax=2048MiB` 제한을 적용하며 검증된 flag와 `.solved`를 성공 기준으로 동일하게 비교합니다.
+`ctf-bench-rev`도 동일한 세 모델 경쟁 구조를 사용합니다. 각 모델은 실제 `ctf-rev`와 같은 루트 `AGENTS.md`, `$ctf-rev` 스킬, rev 피드백, intake를 받으며, 먼저 검증된 `FLAG=`를 출력한 모델이 승리합니다. Dockerfile은 한 번만 빌드하여 세 모델이 같은 불변 이미지를 공유하되 실행 컨테이너와 작업공간은 분리합니다.
 
 `ctf-web`은 white-box와 black-box Web CTF를 모두 지원합니다. 제공된 Compose 파일(`compose.yaml`, `compose.yml`, `docker-compose.yml`, `docker-compose.yaml`)을 가장 먼저 사용하고, 없으면 `Dockerfile`을 빌드해 서비스를 Codex보다 먼저 시작합니다. 원격 URL을 함께 주면 로컬에서 검증한 최소 solver를 같은 원격 문제에 즉시 재생하며, 소스나 Docker가 없어도 정확히 기록된 HTTP(S) origin에서 저소음 black-box 풀이를 계속합니다. 첫 응답에서 forms·scripts·same-origin links·endpoint hints를 추출한 뒤 관찰된 경로만 baseline/단일 mutation 방식으로 시험하며, 서브도메인·포트 스캔, 일반 wordlist, 외부 callback과 write-up 검색은 사용하지 않습니다.
 

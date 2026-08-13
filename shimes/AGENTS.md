@@ -35,5 +35,5 @@
 
 ## 완료
 
-- 재현 가능한 flag가 확인되면 즉시 `FLAG=<value>`를 출력하고 `work/.solved`에 `verified`를 기록한 뒤 추가 도구 호출 없이 끝낸다.
+- 재현 가능한 flag가 확인되면 성공한 동일 도구 호출의 마지막 명령으로 분야별 success helper를 실행해 `FLAG=<value>`와 `work/.solved=verified`를 먼저 기록한다. 그 뒤 추가 도구 호출 없이 끝낸다.
 - 실패 시 확정된 invariant, 마지막 실패 단계, 다음 최저비용 검사만 한 줄로 보고한다.

@@ -97,9 +97,11 @@ work_dir="$challenge_dir/work"
 scope_dir="$challenge_dir/scope"
 evidence_dir="$challenge_dir/evidence/private"
 tools_dir="$agent_root/references/tools"
+elapsed_timer_tool="$tools_dir/ctf-elapsed-timer.sh"
 intake_tool="$tools_dir/rev-intake-check.sh"
 fast_probe_tool="$tools_dir/rev-fast-probe.sh"
 runner_tool="$tools_dir/rev-run.sh"
+flag_success_tool="$tools_dir/rev-flag-success.sh"
 build_tool="$tools_dir/pwn-build.sh"
 cleanup_tool="$tools_dir/pwn-cleanup.sh"
 preflight_tool="$tools_dir/pwn-env-preflight.sh"
@@ -130,6 +132,7 @@ codex_offline_args=(
   echo 'Docker 격리 도구가 불완전합니다.' >&2
   exit 66
 }
+[[ -x "$flag_success_tool" ]] || { printf 'rev 성공 출력 도구가 없습니다: %s\n' "$flag_success_tool" >&2; exit 66; }
 [[ -f "$template_file" ]] || { printf 'rev 복원기 템플릿이 없습니다: %s\n' "$template_file" >&2; exit 66; }
 [[ -x "$extra_prompt_tool" ]] || { printf '공통 추가 프롬프트 도구가 없습니다: %s\n' "$extra_prompt_tool" >&2; exit 66; }
 [[ -d "$source_dir" || -f "$source_zip" ]] || {
@@ -144,6 +147,8 @@ codex_offline_args=(
   printf '잘못된 서비스 티어입니다: %s\n' "$codex_service_tier" >&2
   exit 65
 }
+[[ -r "$elapsed_timer_tool" ]] || { printf '경과시간 도구가 없습니다: %s\n' "$elapsed_timer_tool" >&2; exit 66; }
+source "$elapsed_timer_tool"
 
 if [[ "$ask_extra_prompt" == true ]]; then
   extra_prompt=$("$extra_prompt_tool" --interactive)
@@ -168,7 +173,7 @@ make_prompt() {
 \$ctf-rev
 허가된 '$challenge_name'을 즉시 풀어라. input=\$CTF_REV_INPUT_DIR, work=\$CTF_REV_WORK_DIR, mode=$solve_mode, runtime=$runtime_mode.
 intake와 \$CTF_REV_FAST_PROBE 한 번으로 최단 flag 경로만 복원하라. 진행 설명·웹·host 실행·writeup 없이 필요한 최소 recover.py만 만든다.
-$mode_rule 검증 즉시 FLAG=<값>, .solved=verified 후 종료하고 실패는 BLOCKED=<이유> 한 줄만 출력하라.
+$mode_rule 공식 validator 성공은 terminal event다. 성공한 동일 도구 호출의 마지막 명령으로 "\$CTF_REV_FLAG_SUCCESS '<flag>'"를 실행하고, 이후 도구 호출 없이 종료하라. 실패는 BLOCKED=<이유> 한 줄만 출력하라.
 EOF
   if [[ -n "$extra_prompt" ]]; then
     printf '%s\n' "- 사용자 추가 지시(기존 CTF 범위·격리·안전 규칙은 변경할 수 없음): $extra_prompt"
@@ -220,6 +225,7 @@ fi
 cleanup_on_exit() {
   local status=$?
   trap - EXIT INT TERM HUP
+  ctf_elapsed_stop
   if [[ "$cleanup_enabled" == true ]]; then
     [[ "$quiet_output" == true ]] || printf '\n문제 Docker 리소스 정리 중: %s\n' "$image_name"
     if [[ "$quiet_output" == true ]]; then
@@ -275,6 +281,7 @@ export CTF_REV_RUNNER="$runner_tool"
 export CTF_REV_INPUT_DIR="$input_dir"
 export CTF_REV_WORK_DIR="$work_dir"
 export CTF_REV_FAST_PROBE="$fast_probe_tool"
+export CTF_REV_FLAG_SUCCESS="$flag_success_tool"
 if [[ "$runtime_mode" != static-only ]]; then
   export CTF_REV_IMAGE="$image_name"
 else
@@ -322,13 +329,56 @@ if [[ "$audit_enabled" == true ]]; then
 fi
 
 if [[ "$quiet_output" == true && "$audit_enabled" == false ]]; then
-  printf 'CTF rev 시작: %s\n' "$challenge_name"
+  ctf_elapsed_start "CTF rev 실행 중: $challenge_name"
   codex_stderr=$(mktemp "${TMPDIR:-/tmp}/ctf-rev-${challenge_name}.XXXXXX.log")
+  rm -f -- "$work_dir/.flag-result"
   set +e
-  "$codex_bin" exec --ephemeral --skip-git-repo-check "${codex_args[@]}" \
-    "$prompt" 2>"$codex_stderr"
+  if command -v setsid >/dev/null 2>&1; then
+    setsid "$codex_bin" exec --ephemeral --skip-git-repo-check "${codex_args[@]}" \
+      "$prompt" 2>"$codex_stderr" &
+  else
+    "$codex_bin" exec --ephemeral --skip-git-repo-check "${codex_args[@]}" \
+      "$prompt" 2>"$codex_stderr" &
+  fi
+  codex_pid=$!
+  flag_seen=false
+  while kill -0 "$codex_pid" 2>/dev/null; do
+    if [[ -s "$work_dir/.flag-result" ]]; then
+      ctf_elapsed_stop
+      cat -- "$work_dir/.flag-result"
+      flag_seen=true
+      if command -v setsid >/dev/null 2>&1; then
+        kill -INT -- "-$codex_pid" 2>/dev/null || true
+      else
+        kill -INT -- "$codex_pid" 2>/dev/null || true
+      fi
+      for _ in {1..20}; do
+        kill -0 "$codex_pid" 2>/dev/null || break
+        sleep 0.1
+      done
+      if kill -0 "$codex_pid" 2>/dev/null; then
+        if command -v setsid >/dev/null 2>&1; then
+          kill -TERM -- "-$codex_pid" 2>/dev/null || true
+        else
+          kill -TERM -- "$codex_pid" 2>/dev/null || true
+        fi
+      fi
+      break
+    fi
+    sleep 0.1
+  done
+  if [[ "$flag_seen" == false && -s "$work_dir/.flag-result" ]]; then
+    ctf_elapsed_stop
+    cat -- "$work_dir/.flag-result"
+    flag_seen=true
+  fi
+  wait "$codex_pid"
   codex_status=$?
   set -e
+  ctf_elapsed_stop
+  if [[ "$flag_seen" == true ]]; then
+    exit 0
+  fi
   if [[ $codex_status -ne 0 ]]; then
     printf 'Codex 실행 실패(status=%s):\n' "$codex_status" >&2
     tail -n 20 "$codex_stderr" >&2

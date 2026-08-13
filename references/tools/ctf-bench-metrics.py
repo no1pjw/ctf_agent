@@ -168,6 +168,16 @@ def command_capture(args: argparse.Namespace) -> int:
     usage_deadline: float | None = None
     active_actions: dict[str, str] = {}
 
+    def record_flag(candidate: str, elapsed: float) -> None:
+        flag_path = getattr(args, "flag_file", "")
+        if not flag_path:
+            return
+        destination = Path(flag_path)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        temporary = destination.with_name(destination.name + ".tmp")
+        temporary.write_text(candidate + "\n", encoding="utf-8")
+        temporary.replace(destination)
+
     with output.open("w", encoding="utf-8", newline="\n") as handle:
         while True:
             wait_seconds: float | None = None
@@ -207,6 +217,11 @@ def command_capture(args: argparse.Namespace) -> int:
                 first_flag_seen = True
                 if not args.quiet:
                     print(f"[{args.label} +{elapsed:.1f}s] 첫 플래그 후보: {candidate}", flush=True)
+            if args.race and candidate and not args.stop_on_flag:
+                record_flag(candidate, elapsed)
+                if not args.quiet:
+                    print(f"[{args.label} +{elapsed:.1f}s] 플래그 포착, 경쟁을 즉시 종료", flush=True)
+                return REMOTE_FLAG_EXIT
             event_type = event.get("type")
             item = event.get("item") if isinstance(event.get("item"), dict) else {}
             if not args.quiet and event_type == "thread.started":
@@ -227,6 +242,7 @@ def command_capture(args: argparse.Namespace) -> int:
                 if text:
                     print(f"[{args.label} +{elapsed:.1f}s] 판단: {text[:240]}", flush=True)
             if remote_flag:
+                record_flag(remote_flag, elapsed)
                 remote_flag_seen = True
                 if not args.quiet:
                     print(
@@ -260,6 +276,7 @@ def command_summarize(args: argparse.Namespace) -> int:
     first_flag: str | None = None
     remote_flag_seconds: float | None = None
     remote_flag: str | None = None
+    race_flag: str | None = None
     usage_events = 0
 
     for event in events:
@@ -303,6 +320,12 @@ def command_summarize(args: argparse.Namespace) -> int:
                     first_flag_seconds = float(elapsed)
 
     work_dir = Path(args.work_dir)
+    collab_dir = Path(args.collab_dir) if getattr(args, "collab_dir", "") else None
+    candidate_notes = 0
+    if collab_dir is not None:
+        candidate_root = collab_dir / "candidates"
+        if candidate_root.is_dir():
+            candidate_notes = sum(1 for path in candidate_root.glob("*.md") if path.is_file())
     solved_file = work_dir / ".solved"
     verified = solved_file.exists() and solved_file.read_text(
         encoding="utf-8", errors="replace"
@@ -312,8 +335,17 @@ def command_summarize(args: argparse.Namespace) -> int:
     duration_ms = int(status.get("duration_ms", "0"))
     subagent_events = len(subagent_event_ids)
     remote_mode = status.get("remote_mode") == "true"
+    flag_path = getattr(args, "flag_file", "")
+    if flag_path:
+        path = Path(flag_path)
+        if path.exists():
+            value = path.read_text(encoding="utf-8", errors="replace").strip()
+            if first_valid_flag(value) == value:
+                race_flag = value
     flag_short_circuit = status.get("flag_short_circuit") == "true"
-    if remote_mode:
+    if race_flag is not None:
+        success = True
+    elif remote_mode:
         # In a timed CTF benchmark, an explicitly marked flag from the authorized
         # remote endpoint is the terminal success condition. Exit/replay/writeup
         # status is intentionally ignored after that marker.
@@ -327,6 +359,7 @@ def command_summarize(args: argparse.Namespace) -> int:
         "success": success,
         "remote_mode": remote_mode,
         "remote_flag": remote_flag,
+        "race_flag": race_flag,
         "remote_flag_seconds": remote_flag_seconds,
         "flag_short_circuit": flag_short_circuit,
         "verified": verified,
@@ -345,6 +378,7 @@ def command_summarize(args: argparse.Namespace) -> int:
         "token_usage_events": usage_events,
         "tool_calls": tool_calls,
         "subagent_events": subagent_events,
+        "candidate_notes": candidate_notes,
         "events_file": str(Path(args.events)),
         "work_dir": str(work_dir),
     }
@@ -356,6 +390,8 @@ def command_summarize(args: argparse.Namespace) -> int:
 
 def display_success(summary: dict[str, Any]) -> str:
     if summary.get("success"):
+        if summary.get("race_flag") and not summary.get("remote_mode"):
+            return "성공 (플래그 포착)"
         if summary.get("remote_mode"):
             return "성공 (원격 플래그)"
         return "통과 (clean replay)"
@@ -424,36 +460,46 @@ def markdown_cell(value: Any) -> str:
 
 
 def command_report(args: argparse.Namespace) -> int:
-    plain = json.loads(Path(args.plain).read_text(encoding="utf-8"))
-    fast = json.loads(Path(args.fast).read_text(encoding="utf-8"))
-    remote_mode = bool(plain.get("remote_mode") or fast.get("remote_mode"))
+    specs = list(args.summary or [])
+    if not specs:
+        specs = [f"luna={args.plain}", f"terra={args.fast}"]
+    participants: list[tuple[str, dict[str, Any]]] = []
+    for spec in specs:
+        key, separator, path = spec.partition("=")
+        if not separator or not key or not path:
+            raise SystemExit(f"잘못된 summary 지정: {spec}")
+        participants.append((key, json.loads(Path(path).read_text(encoding="utf-8"))))
+    remote_mode = any(bool(summary.get("remote_mode")) for _, summary in participants)
     flag_time_label = "원격 플래그 시간" if remote_mode else "첫 플래그 후보"
-    plain_flag_time = plain.get("remote_flag_seconds") if remote_mode else plain.get("first_flag_seconds")
-    fast_flag_time = fast.get("remote_flag_seconds") if remote_mode else fast.get("first_flag_seconds")
-    plain_solve_time = plain_flag_time if remote_mode and plain_flag_time is not None else plain["duration_seconds"]
-    fast_solve_time = fast_flag_time if remote_mode and fast_flag_time is not None else fast["duration_seconds"]
-    rows = [
-        ("성공", display_success(plain), display_success(fast)),
-        ("풀이 시간", seconds(plain_solve_time), seconds(fast_solve_time)),
-        (flag_time_label, seconds(plain_flag_time), seconds(fast_flag_time)),
-        ("총 토큰", display_tokens(plain), display_tokens(fast)),
-        ("도구 호출", f"{plain['tool_calls']}회", f"{fast['tool_calls']}회"),
-        ("서브에이전트 이벤트", f"{plain['subagent_events']}회", f"{fast['subagent_events']}회"),
-    ]
+    labels = [str(summary.get("label") or key) for key, summary in participants]
+    values: list[list[str]] = []
+    for key, summary in participants:
+        flag_time = summary.get("remote_flag_seconds") if remote_mode else summary.get("first_flag_seconds")
+        solve_time = flag_time if remote_mode and flag_time is not None else summary.get("duration_seconds")
+        values.append([
+            display_success(summary),
+            seconds(solve_time),
+            seconds(flag_time),
+            display_tokens(summary),
+            f"{summary.get('tool_calls', 0)}회",
+            f"{summary.get('subagent_events', 0)}회",
+            f"{summary.get('candidate_notes', 0)}개",
+        ])
+    rows = [(metric, *[value[index] for value in values]) for index, metric in enumerate(("성공", "풀이 시간", flag_time_label, "총 토큰", "도구 호출", "서브에이전트 이벤트", "공유 후보"))]
     lines = [
         "# CTF Benchmark",
         "",
-        "| 지표 | plain Codex | FAST_LOCAL |",
-        "| --- | ---: | ---: |",
+        "| 지표 | " + " | ".join(markdown_cell(label) for label in labels) + " |",
+        "| --- | " + " | ".join("---:" for _ in labels) + " |",
     ]
     lines.extend(
-        f"| {markdown_cell(metric)} | {markdown_cell(plain_value)} | {markdown_cell(fast_value)} |"
-        for metric, plain_value, fast_value in rows
+        "| " + " | ".join([markdown_cell(metric), *[markdown_cell(value) for value in row[1:]]]) + " |"
+        for row in rows for metric in [row[0]]
     )
     if remote_mode:
         lines.extend(
             [
-                f"| 획득한 원격 플래그 | {markdown_cell(plain.get('remote_flag') or '-')} | {markdown_cell(fast.get('remote_flag') or '-')} |",
+                "| 획득한 원격 플래그 | " + " | ".join(markdown_cell(summary.get("remote_flag") or summary.get("race_flag") or "-") for _, summary in participants) + " |",
             ]
         )
     lines.extend(
@@ -461,15 +507,16 @@ def command_report(args: argparse.Namespace) -> int:
             "",
             "## 고정 설정",
             "",
-            "- Model: `gpt-5.6-sol`",
+            "- Models: `gpt-5.6-luna`, `gpt-5.6-terra`, `gpt-5.6-sol`",
             "- Reasoning effort: `max`",
             "- Service tier: `fast`",
             "- Multi-agent: disabled",
             "- Automatic skill search: disabled",
             "- User-installed skills: isolated with a temporary CODEX_HOME",
             "- Sessions: ephemeral",
-            "- Execution: plain Codex and FAST_LOCAL in parallel",
-            f"- Success mode: {'bounded remote harness flag short-circuit' if remote_mode else 'local clean replay'}",
+            "- Execution: LUNA, TERRA, and SOL in parallel competition mode",
+            "- Collaboration: candidate notes are exchanged through the per-run collab/candidates directory",
+            f"- Success mode: {'bounded remote harness or explicit FLAG marker short-circuit' if remote_mode else 'explicit FLAG marker short-circuit'}",
             "",
             "`총 토큰`은 Codex JSONL의 `turn.completed.usage`에서 받은 `input_tokens + output_tokens` 합계입니다.",
             "원격 플래그 시각은 즉시 고정하고, 후속 도구 실행을 금지한 채 최종 `turn.completed.usage`만 제한 시간 동안 기다립니다. usage가 끝내 오지 않으면 0으로 오표시하지 않고 `미집계`로 표시합니다. 즉시 종료가 더 중요할 때만 `--no-exact-tokens`를 사용합니다.",
@@ -488,11 +535,10 @@ def command_report(args: argparse.Namespace) -> int:
     )
     report = "\n".join(lines)
     Path(args.output).write_text(report, encoding="utf-8")
-    print("\n" + terminal_table(("지표", "plain Codex", "FAST_LOCAL"), rows))
-    if remote_mode:
-        print("\n획득한 원격 플래그")
-        print(f"  plain Codex: {plain.get('remote_flag') or '-'}")
-        print(f"  FAST_LOCAL:  {fast.get('remote_flag') or '-'}")
+    print("\n" + terminal_table(("지표", *labels), rows))
+    print("\n획득한 플래그")
+    for key, summary in participants:
+        print(f"  {summary.get('label') or key}: {summary.get('remote_flag') or summary.get('race_flag') or '-'}")
     return 0
 
 
@@ -505,6 +551,8 @@ def parser() -> argparse.ArgumentParser:
     capture.add_argument("--output", required=True)
     capture.add_argument("--quiet", action="store_true")
     capture.add_argument("--stop-on-flag", action="store_true")
+    capture.add_argument("--race", action="store_true")
+    capture.add_argument("--flag-file", default="")
     capture.add_argument("--usage-grace", type=float, default=0.0)
     capture.set_defaults(function=command_capture)
 
@@ -515,11 +563,14 @@ def parser() -> argparse.ArgumentParser:
     summarize.add_argument("--status", required=True)
     summarize.add_argument("--work-dir", required=True)
     summarize.add_argument("--output", required=True)
+    summarize.add_argument("--flag-file", default="")
+    summarize.add_argument("--collab-dir", default="")
     summarize.set_defaults(function=command_summarize)
 
     report = subcommands.add_parser("report")
-    report.add_argument("--plain", required=True)
-    report.add_argument("--fast", required=True)
+    report.add_argument("--summary", action="append")
+    report.add_argument("--plain")
+    report.add_argument("--fast")
     report.add_argument("--output", required=True)
     report.set_defaults(function=command_report)
     return root

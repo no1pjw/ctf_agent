@@ -127,6 +127,7 @@ work_dir="$challenge_dir/work"
 evidence_dir="$challenge_dir/evidence"
 scope_dir="$challenge_dir/scope"
 tools_dir="$agent_root/references/tools"
+elapsed_timer_tool="$tools_dir/ctf-elapsed-timer.sh"
 extra_prompt_tool="$tools_dir/ctf-extra-prompt.sh"
 runtime_tool="$tools_dir/pwn-runtime-prepare.sh"
 intake_tool="$tools_dir/pwn-intake-check.sh"
@@ -155,6 +156,8 @@ if [[ ! "$codex_service_tier" =~ ^[A-Za-z0-9._-]+$ ]]; then
   printf '잘못된 Codex 서비스 티어입니다: %s\n' "$codex_service_tier" >&2
   exit 65
 fi
+[[ -r "$elapsed_timer_tool" ]] || { printf '경과시간 도구가 없습니다: %s\n' "$elapsed_timer_tool" >&2; exit 66; }
+source "$elapsed_timer_tool"
 [[ "$codex_reasoning_effort" =~ ^(low|medium|high|xhigh|max|ultra)$ ]] || {
   printf '잘못된 추론 강도입니다: %s\n' "$codex_reasoning_effort" >&2
   exit 65
@@ -375,6 +378,7 @@ fi
 cleanup_on_exit() {
   local status=$?
   trap - EXIT INT TERM HUP
+  ctf_elapsed_stop
   if [[ -n "$process_run_id" ]]; then
     "$process_cleanup_tool" "$process_run_id" || true
   fi
@@ -551,9 +555,9 @@ fi
 
 if [[ "$quiet_output" == true ]]; then
   if [[ -n "$remote_host" ]]; then
-    printf 'CTF pwn 시작: %s -> %s:%s\n' "$challenge_name" "$remote_host" "$remote_port"
+    ctf_elapsed_start "CTF pwn 실행 중: $challenge_name -> $remote_host:$remote_port"
   else
-    printf 'CTF pwn 시작: %s\n' "$challenge_name"
+    ctf_elapsed_start "CTF pwn 실행 중: $challenge_name"
   fi
   codex_stderr=$(mktemp "${TMPDIR:-/tmp}/ctf-pwn-${challenge_name}.XXXXXX.log")
   set +e
@@ -564,6 +568,7 @@ if [[ "$quiet_output" == true ]]; then
     -c "approval_policy=\"$approval_policy\"" "$prompt" 2>"$codex_stderr"
   codex_status=$?
   set -e
+  ctf_elapsed_stop
   if [[ $codex_status -ne 0 ]]; then
     printf 'Codex 실행 실패(status=%s):\n' "$codex_status" >&2
     tail -n 20 "$codex_stderr" >&2
