@@ -13,6 +13,10 @@ work_dir=${CTF_REV_WORK_DIR:-}
   echo 'invalid flag value' >&2
   exit 65
 }
+[[ "$flag" =~ ^[A-Za-z][A-Za-z0-9_]{0,31}\{[^{}[:cntrl:]]{1,4050}\}$ ]] || {
+  echo 'invalid flag format: expected PREFIX{payload} without nested braces' >&2
+  exit 65
+}
 
 result_tmp=$(mktemp "$work_dir/.flag-result.tmp.XXXXXX")
 solved_tmp=$(mktemp "$work_dir/.solved.tmp.XXXXXX")

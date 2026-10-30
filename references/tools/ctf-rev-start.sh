@@ -18,19 +18,22 @@ usage() {
   --keep-docker     종료 후 이 문제의 Docker 이미지·컨테이너 보존
   --keep-workspace  해결 후에도 중복 입력과 재생성 파일 보존
   --extra-prompt    실행 직전에 여러 줄 추가 지시 입력(.end로 종료)
-  --verbose         상세 Codex TUI와 준비 로그 표시(기본: 최종 결과만 출력)
+  --no-skill        SKILL.md와 프로젝트 AGENTS.md를 주입하지 않고 풀이
+  --verbose         진행 멘트에 더해 Codex 명령과 도구 결과도 상세 출력
   --prepare-only    입력·intake·Docker 환경만 준비하고 Codex는 실행하지 않음
   --dry-run         파일을 변경하지 않고 경로와 실행 설정만 표시
   -h, --help        도움말
 
 환경 변수:
-  CTF_REV_SOURCE              기본 원본 루트(기본 $HOME/ctf-challenges/rev)
+  CTF_SEEDS_ROOT              공통 문제 루트(기본 /mnt/c/Users/JW/Desktop/agents/ctf_seeds)
+  CTF_REV_SOURCE              rev 원본 루트(기본 $CTF_SEEDS_ROOT/rev)
   CTF_AGENT_ROOT              설치된 ctf-agent 루트
   CTF_MIN_HOST_FREE_MB        Windows 최소 여유 공간(MiB, 기본 4096)
   CODEX_BIN                   Codex CLI 경로
   CTF_CODEX_MODEL             모델(기본 gpt-5.6-sol)
   CTF_CODEX_REASONING_EFFORT  추론 강도(기본 max)
   CTF_CODEX_SERVICE_TIER      서비스 티어(기본 fast)
+  CTF_USE_SKILL               false면 --no-skill과 동일(기본 true)
   CTF_EXTRA_PROMPT             대화형 입력 없이 추가할 공통 프롬프트
 EOF
 }
@@ -43,7 +46,9 @@ keep_docker=false
 keep_workspace=false
 ask_extra_prompt=false
 quiet_output=true
-source_root=${CTF_REV_SOURCE:-$HOME/ctf-challenges/rev}
+skill_enabled=${CTF_USE_SKILL:-true}
+seeds_root=${CTF_SEEDS_ROOT:-/mnt/c/Users/JW/Desktop/agents/ctf_seeds}
+source_root=${CTF_REV_SOURCE:-$seeds_root/rev}
 challenge_name=
 
 while [[ $# -gt 0 ]]; do
@@ -58,6 +63,8 @@ while [[ $# -gt 0 ]]; do
     --keep-docker) keep_docker=true ;;
     --keep-workspace) keep_workspace=true ;;
     --extra-prompt) ask_extra_prompt=true ;;
+    --no-skill) skill_enabled=false ;;
+    --skill) skill_enabled=true ;;
     --verbose) quiet_output=false ;;
     --fast-only) solve_mode=fast-only ;;
     --deep) solve_mode=deep ;;
@@ -79,6 +86,12 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
+case "$skill_enabled" in
+  true|1|yes|on) skill_enabled=true ;;
+  false|0|no|off) skill_enabled=false ;;
+  *) printf 'CTF_USE_SKILL은 true 또는 false여야 합니다: %s\n' "$skill_enabled" >&2; exit 65 ;;
+esac
+
 [[ -n "$challenge_name" ]] || { usage >&2; exit 64; }
 if [[ ! "$challenge_name" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || [[ "$challenge_name" == . || "$challenge_name" == .. ]]; then
   printf '잘못된 문제 이름입니다: %s\n' "$challenge_name" >&2
@@ -89,6 +102,11 @@ script_path=$(readlink -f -- "${BASH_SOURCE[0]}")
 script_dir=$(cd -- "$(dirname -- "$script_path")" && pwd)
 default_agent_root=$(cd -- "$script_dir/../.." && pwd)
 agent_root=${CTF_AGENT_ROOT:-$default_agent_root}
+export DOCKER_CONFIG=${CTF_DOCKER_CONFIG:-$agent_root/state/docker-config}
+mkdir -p "$DOCKER_CONFIG"
+[[ -f "$DOCKER_CONFIG/config.json" ]] || printf '{"auths":{}}\n' > "$DOCKER_CONFIG/config.json"
+docker_desktop_cli=/mnt/wsl/docker-desktop/cli-tools/usr/bin
+[[ ! -x "$docker_desktop_cli/docker" ]] || export PATH="$docker_desktop_cli:$PATH"
 source_dir="$source_root/$challenge_name"
 source_zip="$source_root/$challenge_name.zip"
 challenge_dir="$agent_root/challenges/$challenge_name"
@@ -97,6 +115,7 @@ work_dir="$challenge_dir/work"
 scope_dir="$challenge_dir/scope"
 evidence_dir="$challenge_dir/evidence/private"
 tools_dir="$agent_root/references/tools"
+token_usage_tool="$tools_dir/ctf-token-usage.py"
 elapsed_timer_tool="$tools_dir/ctf-elapsed-timer.sh"
 intake_tool="$tools_dir/rev-intake-check.sh"
 fast_probe_tool="$tools_dir/rev-fast-probe.sh"
@@ -107,6 +126,7 @@ cleanup_tool="$tools_dir/pwn-cleanup.sh"
 preflight_tool="$tools_dir/pwn-env-preflight.sh"
 template_file="$tools_dir/rev-recover-template.py"
 extra_prompt_tool="$tools_dir/ctf-extra-prompt.sh"
+no_skill_tool="$tools_dir/ctf-no-skill.sh"
 image_slug=$(printf '%s' "$challenge_name" | tr '[:upper:]_.' '[:lower:]--')
 image_name="ctf-rev-$image_slug:local"
 codex_bin=${CODEX_BIN:-}
@@ -135,6 +155,15 @@ codex_offline_args=(
 [[ -x "$flag_success_tool" ]] || { printf 'rev 성공 출력 도구가 없습니다: %s\n' "$flag_success_tool" >&2; exit 66; }
 [[ -f "$template_file" ]] || { printf 'rev 복원기 템플릿이 없습니다: %s\n' "$template_file" >&2; exit 66; }
 [[ -x "$extra_prompt_tool" ]] || { printf '공통 추가 프롬프트 도구가 없습니다: %s\n' "$extra_prompt_tool" >&2; exit 66; }
+[[ -x "$token_usage_tool" ]] || { printf '토큰 집계 도구가 없습니다: %s\n' "$token_usage_tool" >&2; exit 66; }
+if [[ "$skill_enabled" == false ]]; then
+  [[ -r "$no_skill_tool" ]] || { printf 'no-skill 실행 도구가 없습니다: %s\n' "$no_skill_tool" >&2; exit 66; }
+  source "$no_skill_tool"
+  ctf_no_skill_codex_args "$agent_root"
+  codex_context_args=("${CTF_NO_SKILL_CODEX_ARGS[@]}")
+else
+  codex_context_args=()
+fi
 [[ -d "$source_dir" || -f "$source_zip" ]] || {
   printf '문제를 찾을 수 없습니다. 다음 중 하나가 필요합니다:\n  %s\n  %s\n' "$source_dir" "$source_zip" >&2
   exit 67
@@ -159,7 +188,7 @@ fi
 planned_runtime=static-only
 if [[ -f "$source_dir/Dockerfile" ]]; then
   planned_runtime=supplied-docker
-elif docker image inspect "$image_name" >/dev/null 2>&1; then
+elif timeout --kill-after=2s 15s docker image inspect "$image_name" >/dev/null 2>&1; then
   planned_runtime=cached-docker
 fi
 
@@ -169,10 +198,17 @@ mode_rule='직접 복원 2회 실패나 packing/VM/환경 불일치 때만 Deep�
 
 make_prompt() {
   local runtime_mode=$1
+  local skill_invocation= no_skill_contract=
+  if [[ "$skill_enabled" == true ]]; then
+    skill_invocation='$ctf-rev'
+  else
+    no_skill_contract='분야 지침·feedback·playbook 파일은 열지 마라. 입력 원본을 수정하지 말고 신뢰할 수 없는 파일을 호스트에서 실행하지 마라. 제공된 intake·환경변수·격리 하니스만 사용하며 외부 네트워크·웹 검색·write-up·서브에이전트는 금지한다.'
+  fi
   cat <<EOF
-\$ctf-rev
+$skill_invocation
 허가된 '$challenge_name'을 즉시 풀어라. input=\$CTF_REV_INPUT_DIR, work=\$CTF_REV_WORK_DIR, mode=$solve_mode, runtime=$runtime_mode.
-intake와 \$CTF_REV_FAST_PROBE 한 번으로 최단 flag 경로만 복원하라. 진행 설명·웹·host 실행·writeup 없이 필요한 최소 recover.py만 만든다.
+intake와 \$CTF_REV_FAST_PROBE 한 번으로 최단 flag 경로만 복원하라. 웹·host 실행·writeup 없이 필요한 최소 recover.py만 만든다. 작업 시작, 분석 대상 변경, 복원식 검증, 장시간 대기 시작 때 현재 하는 일과 다음 행동을 한국어 1~2문장으로 즉시 알려라. 같은 상태를 반복 설명하지 마라.
+$no_skill_contract
 $mode_rule 공식 validator 성공은 terminal event다. 성공한 동일 도구 호출의 마지막 명령으로 "\$CTF_REV_FLAG_SUCCESS '<flag>'"를 실행하고, 이후 도구 호출 없이 종료하라. 실패는 BLOCKED=<이유> 한 줄만 출력하라.
 EOF
   if [[ -n "$extra_prompt" ]]; then
@@ -181,8 +217,9 @@ EOF
 }
 
 if [[ "$action" == dry-run ]]; then
-  printf '원본 디렉터리: %s\n원본 ZIP:       %s\n작업 경로:      %s\n모드:           %s\n예상 runtime:   %s\nCodex 모델:     %s\n추론 강도:      %s\n서비스 티어:    %s (Fast mode 활성)\n\n' \
+  printf '원본 디렉터리: %s\n원본 ZIP:       %s\n작업 경로:      %s\n모드:           %s\n예상 runtime:   %s\n분야 스킬:      %s\nCodex 모델:     %s\n추론 강도:      %s\n서비스 티어:    %s (Fast mode 활성)\n\n' \
     "$source_dir" "$source_zip" "$challenge_dir" "$solve_mode" "$planned_runtime" \
+    "$([[ "$skill_enabled" == true ]] && printf '사용' || printf '미사용')" \
     "$codex_model" "$codex_reasoning_effort" "$codex_service_tier"
   make_prompt "$planned_runtime"
   exit 0
@@ -202,10 +239,10 @@ mkdir -p "$input_dir" "$work_dir" "$scope_dir" "$evidence_dir"
 printf 'rev\n' > "$challenge_dir/.ctf-category"
 if [[ -d "$source_dir" ]]; then
   printf '%s\n' "$source_dir" > "$scope_dir/source-path.txt"
-  cp -a --update=none -- "$source_dir"/. "$input_dir"/
+  cp -an -- "$source_dir"/. "$input_dir"/
 else
   printf '%s\n' "$source_zip" > "$scope_dir/source-path.txt"
-  cp -a --update=none -- "$source_zip" "$input_dir"/
+  cp -an -- "$source_zip" "$input_dir"/
 fi
 cat > "$scope_dir/runtime.env" <<EOF
 authorization=user-supplied-local-ctf-artifact
@@ -249,6 +286,10 @@ trap 'exit 143' TERM
 trap 'exit 129' HUP
 
 build_status=0
+if [[ "$action" == prepare-only && ${CTF_PREPARE_STATIC_ONLY:-false} == true ]]; then
+  printf 'Claude handoff용 정적 준비 완료: %s\n' "$challenge_dir"
+  exit 0
+fi
 if [[ -f "$input_dir/Dockerfile" ]]; then
   build_args=()
   [[ "$rebuild" == false ]] || build_args+=(--rebuild)
@@ -264,7 +305,7 @@ if [[ -f "$input_dir/Dockerfile" ]]; then
 fi
 
 runtime_mode=static-only
-if [[ $build_status -eq 0 ]] && docker image inspect "$image_name" >/dev/null 2>&1; then
+if [[ $build_status -eq 0 ]] && timeout --kill-after=2s 15s docker image inspect "$image_name" >/dev/null 2>&1; then
   runtime_mode=$([[ -f "$input_dir/Dockerfile" ]] && printf supplied-docker || printf cached-docker)
   set +e
   if [[ "$quiet_output" == true ]]; then
@@ -298,7 +339,7 @@ if [[ "$audit_enabled" == true ]]; then
   printf '%s\n' "$prompt" > "$audit_dir/prompt.txt"
   {
     printf 'run_id=%s\nchallenge=%s\nmode=%s\nruntime=%s\n' "$run_id" "$challenge_name" "$solve_mode" "$runtime_mode"
-    printf 'model=%s\nreasoning=%s\nservice_tier=%s\nnetwork=denied\n' "$codex_model" "$codex_reasoning_effort" "$codex_service_tier"
+    printf 'model=%s\nreasoning=%s\nservice_tier=%s\nskill_enabled=%s\nnetwork=denied\n' "$codex_model" "$codex_reasoning_effort" "$codex_service_tier" "$skill_enabled"
   } > "$audit_dir/run-info.txt"
 fi
 
@@ -323,74 +364,34 @@ codex_args=(
   "${codex_offline_args[@]}"
   --sandbox danger-full-access
   -c 'approval_policy="never"'
+  "${codex_context_args[@]}"
 )
 if [[ "$audit_enabled" == true ]]; then
   codex_args+=(-c "log_dir=\"$audit_dir/tui\"")
 fi
 
-if [[ "$quiet_output" == true && "$audit_enabled" == false ]]; then
+if [[ "$quiet_output" == true ]]; then
   ctf_elapsed_start "CTF rev 실행 중: $challenge_name"
-  codex_stderr=$(mktemp "${TMPDIR:-/tmp}/ctf-rev-${challenge_name}.XXXXXX.log")
-  rm -f -- "$work_dir/.flag-result"
-  set +e
-  if command -v setsid >/dev/null 2>&1; then
-    setsid "$codex_bin" exec --ephemeral --skip-git-repo-check "${codex_args[@]}" \
-      "$prompt" 2>"$codex_stderr" &
-  else
-    "$codex_bin" exec --ephemeral --skip-git-repo-check "${codex_args[@]}" \
-      "$prompt" 2>"$codex_stderr" &
-  fi
-  codex_pid=$!
-  flag_seen=false
-  while kill -0 "$codex_pid" 2>/dev/null; do
-    if [[ -s "$work_dir/.flag-result" ]]; then
-      ctf_elapsed_stop
-      cat -- "$work_dir/.flag-result"
-      flag_seen=true
-      if command -v setsid >/dev/null 2>&1; then
-        kill -INT -- "-$codex_pid" 2>/dev/null || true
-      else
-        kill -INT -- "$codex_pid" 2>/dev/null || true
-      fi
-      for _ in {1..20}; do
-        kill -0 "$codex_pid" 2>/dev/null || break
-        sleep 0.1
-      done
-      if kill -0 "$codex_pid" 2>/dev/null; then
-        if command -v setsid >/dev/null 2>&1; then
-          kill -TERM -- "-$codex_pid" 2>/dev/null || true
-        else
-          kill -TERM -- "$codex_pid" 2>/dev/null || true
-        fi
-      fi
-      break
-    fi
-    sleep 0.1
-  done
-  if [[ "$flag_seen" == false && -s "$work_dir/.flag-result" ]]; then
-    ctf_elapsed_stop
-    cat -- "$work_dir/.flag-result"
-    flag_seen=true
-  fi
-  wait "$codex_pid"
-  codex_status=$?
-  set -e
-  ctf_elapsed_stop
-  if [[ "$flag_seen" == true ]]; then
-    exit 0
-  fi
-  if [[ $codex_status -ne 0 ]]; then
-    printf 'Codex 실행 실패(status=%s):\n' "$codex_status" >&2
-    tail -n 20 "$codex_stderr" >&2
-  fi
-  rm -f -- "$codex_stderr"
-  exit "$codex_status"
 fi
 
+token_args=()
+[[ "$quiet_output" == true ]] || token_args+=(--verbose)
+[[ -z ${CTF_USAGE_SUMMARY_FILE:-} ]] || token_args+=(--summary "$CTF_USAGE_SUMMARY_FILE")
+if [[ "$audit_enabled" == true ]]; then
+  token_args+=(--events "$audit_dir/codex-events.jsonl")
+fi
+codex_stderr=$(mktemp "${TMPDIR:-/tmp}/ctf-rev-${challenge_name}.XXXXXX.log")
 set +e
-"$codex_bin" "${codex_args[@]}" "$prompt"
-codex_status=$?
+"$codex_bin" exec --ephemeral --skip-git-repo-check "${codex_args[@]}" \
+  --json "$prompt" 2>"$codex_stderr" | python3 "$token_usage_tool" "${token_args[@]}"
+codex_status=${PIPESTATUS[0]}
 set -e
+[[ "$quiet_output" == false ]] || ctf_elapsed_stop true
+if [[ $codex_status -ne 0 ]]; then
+  printf 'Codex 실행 실패(status=%s):\n' "$codex_status" >&2
+  tail -n 20 "$codex_stderr" >&2
+fi
+rm -f -- "$codex_stderr"
 if [[ "$audit_enabled" == true ]]; then
   printf 'finished_utc=%s\nexit_status=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$codex_status" >> "$audit_dir/run-info.txt"
 fi

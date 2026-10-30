@@ -36,6 +36,18 @@ chmod +x \
   "$target_dir/references/tools/ctf-bench.sh" \
   "$target_dir/references/tools/ctf-bench-metrics.py" \
   "$target_dir/references/tools/ctf-extra-prompt.sh" \
+  "$target_dir/references/tools/ctf-no-skill.sh" \
+  "$target_dir/references/tools/ctf-token-usage.py" \
+  "$target_dir/references/tools/ctf-writeup.sh" \
+  "$target_dir/references/tools/ctf-writeup-sanitize.py" \
+  "$target_dir/references/tools/ctf-docker-ready.sh" \
+  "$target_dir/references/tools/ctf-claude-metrics.py" \
+  "$target_dir/references/tools/ctf-claude-stream.py" \
+  "$target_dir/references/tools/ctf-claude-codex.sh" \
+  "$target_dir/references/tools/ctf-claude-only.sh" \
+  "$target_dir/references/tools/ctf-compare.sh" \
+  "$target_dir/references/tools/ctf-compare-report.py" \
+  "$target_dir/references/tools/ctf-stream-ui.sh" \
   "$target_dir/references/tools/ctf-learn.sh" \
   "$target_dir/references/tools/ctf-clean.sh" \
   "$target_dir/references/tools/ctf-export.sh" \
@@ -57,6 +69,11 @@ mkdir -p "$HOME/.local/bin"
 ln -sfn "$target_dir/references/tools/ctf-pwn-start.sh" "$HOME/.local/bin/ctf-pwn"
 ln -sfn "$target_dir/references/tools/ctf-rev-start.sh" "$HOME/.local/bin/ctf-rev"
 ln -sfn "$target_dir/references/tools/ctf-web-start.sh" "$HOME/.local/bin/ctf-web"
+for claude_category in pwn rev web; do
+  ln -sfn "$target_dir/references/tools/ctf-claude-only.sh" "$HOME/.local/bin/ctf-$claude_category-claude"
+  ln -sfn "$target_dir/references/tools/ctf-claude-codex.sh" "$HOME/.local/bin/ctf-$claude_category-mix"
+  ln -sfn "$target_dir/references/tools/ctf-compare.sh" "$HOME/.local/bin/ctf-compare-$claude_category"
+done
 ln -sfn "$target_dir/references/tools/ctf-bench.sh" "$HOME/.local/bin/ctf-bench"
 for bench_category in pwn rev web crypto forensics; do
   ln -sfn "$target_dir/references/tools/ctf-bench.sh" "$HOME/.local/bin/ctf-bench-$bench_category"
@@ -67,9 +84,10 @@ for learn_category in pwn rev web; do
 done
 ln -sfn "$target_dir/references/tools/ctf-clean.sh" "$HOME/.local/bin/ctf-clean"
 ln -sfn "$target_dir/references/tools/ctf-export.sh" "$HOME/.local/bin/ctf-export"
+ln -sfn "$target_dir/references/tools/ctf-writeup.sh" "$HOME/.local/bin/ctf-writeup"
 
 mkdir -p "$HOME/.codex/skills"
-for spec in ctf-rev:rev-agent/skills ctf-pwn:pwn-agent/skills ctf-web:web-agent/skills ctf-learn:learn-agent/skills/ctf-learn; do
+for spec in ctf-rev:rev-agent/skills ctf-pwn:pwn-agent/skills ctf-web:web-agent/skills ctf-learn:learn-agent/skills/ctf-learn ctf-writeup:writeup-agent/skills/ctf-writeup; do
   skill_name="${spec%%:*}"
   skill_rel="${spec#*:}"
   link_path="$HOME/.codex/skills/$skill_name"
@@ -86,10 +104,14 @@ printf 'Installed CTF agent: %s\n' "$target_dir"
 printf 'Pwn launcher:        %s\n' "$HOME/.local/bin/ctf-pwn"
 printf 'Rev launcher:        %s\n' "$HOME/.local/bin/ctf-rev"
 printf 'Web launcher:        %s\n' "$HOME/.local/bin/ctf-web"
+printf 'Claude only:         %s\n' "$HOME/.local/bin/ctf-{pwn,rev,web}-claude"
+printf 'Claude→Codex mix:    %s\n' "$HOME/.local/bin/ctf-{pwn,rev,web}-mix"
+printf 'A/B comparison:      %s\n' "$HOME/.local/bin/ctf-compare-{pwn,rev,web}"
 printf 'Benchmark command:   %s\n' "$HOME/.local/bin/ctf-bench"
 printf 'Category benchmarks: %s\n' "$HOME/.local/bin/ctf-bench-{pwn,rev,web,crypto,forensics}"
 printf 'Learning command:    %s\n' "$HOME/.local/bin/ctf-learn"
 printf 'Category learning:   %s\n' "$HOME/.local/bin/ctf-learn-{pwn,rev,web}"
 printf 'Cleanup command:     %s\n' "$HOME/.local/bin/ctf-clean"
 printf 'Export command:      %s\n' "$HOME/.local/bin/ctf-export"
+printf 'Write-up command:    %s\n' "$HOME/.local/bin/ctf-writeup"
 printf 'Start with: cd %q && codex\n' "$target_dir"

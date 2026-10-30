@@ -34,6 +34,7 @@ ctf_elapsed_start() {
 
 ctf_elapsed_stop() {
   [[ "$CTF_ELAPSED_ACTIVE" == true ]] || return 0
+  local quiet=${1:-false}
   local now elapsed formatted
   now=$(date +%s)
   elapsed=$((now - CTF_ELAPSED_STARTED))
@@ -43,7 +44,9 @@ ctf_elapsed_stop() {
     wait "$CTF_ELAPSED_PID" 2>/dev/null || true
     CTF_ELAPSED_PID=
   fi
-  if [[ "$CTF_ELAPSED_TTY" == true ]]; then
+  if [[ "$quiet" == true ]]; then
+    [[ "$CTF_ELAPSED_TTY" == false ]] || printf '\r\033[2K'
+  elif [[ "$CTF_ELAPSED_TTY" == true ]]; then
     printf '\r\033[2K%s | 총 소요 %s\n' "$CTF_ELAPSED_LABEL" "$formatted"
   else
     printf '%s | 총 소요 %s\n' "$CTF_ELAPSED_LABEL" "$formatted"

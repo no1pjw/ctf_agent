@@ -1,0 +1,4 @@
+interface:
+  display_name: "CTF Write-up"
+  short_description: "검증된 CTF 풀이를 공개용 Markdown write-up으로 정리"
+  default_prompt: "Use $ctf-writeup to document this verified authorized CTF solve as a redacted Markdown write-up."

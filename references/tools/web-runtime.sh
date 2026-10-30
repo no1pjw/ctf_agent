@@ -104,7 +104,8 @@ if [[ -n "$container_port" ]]; then
 fi
 command -v docker >/dev/null 2>&1 || { echo 'docker CLI is required' >&2; exit 69; }
 command -v python3 >/dev/null 2>&1 || { echo 'python3 is required' >&2; exit 69; }
-docker info >/dev/null 2>&1 || { echo 'docker daemon is unavailable' >&2; exit 69; }
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+"$script_dir/ctf-docker-ready.sh" || { echo 'docker daemon is unavailable after retries' >&2; exit 69; }
 
 input_real=$(readlink -f -- "$input_dir")
 mkdir -p "$work_dir"
@@ -251,7 +252,6 @@ for container in json.load(sys.stdin):
   fi
 elif [[ -f "$service_copy/Dockerfile" ]]; then
   runtime_mode=dockerfile
-  script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
   "$script_dir/pwn-build.sh" "$service_copy" "$image_ref" >> "$log_file" 2>&1
   if [[ -z "$container_port" ]]; then
     container_port=$(docker image inspect "$image_ref" --format '{{json .Config.ExposedPorts}}' | python3 -c '

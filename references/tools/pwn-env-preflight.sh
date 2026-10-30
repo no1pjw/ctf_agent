@@ -12,7 +12,8 @@ if [[ $# -ne 0 ]]; then
 fi
 
 command -v docker >/dev/null 2>&1 || { echo 'docker=missing'; exit 1; }
-docker info >/dev/null 2>&1 || { echo 'docker_daemon=unavailable'; exit 1; }
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+"$script_dir/ctf-docker-ready.sh" || { echo 'docker_daemon=unavailable'; exit 1; }
 echo 'docker_daemon=ok'
 
 if command -v gdb >/dev/null 2>&1; then
@@ -22,7 +23,7 @@ else
 fi
 
 if [[ -n "$image" ]]; then
-  docker image inspect "$image" >/dev/null 2>&1 || {
+  timeout --kill-after=2s 15s docker image inspect "$image" >/dev/null 2>&1 || {
     printf 'image=missing:%s\n' "$image"
     exit 2
   }

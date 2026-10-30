@@ -43,9 +43,10 @@ pwn 기본 조작법:
 
 환경 변수:
   CTF_AGENT_ROOT      설치된 ctf-agent 루트
-  CTF_PWNABLE_SOURCE  pwn 기본 원본 루트
-  CTF_REV_SOURCE      rev 기본 원본 루트
-  CTF_WEB_SOURCE      web 기본 원본 루트
+  CTF_SEEDS_ROOT      공통 문제 루트(기본 /mnt/c/Users/JW/Desktop/agents/ctf_seeds)
+  CTF_PWNABLE_SOURCE  pwn 기본 원본 루트(기본 $CTF_SEEDS_ROOT/pwn)
+  CTF_REV_SOURCE      rev 기본 원본 루트(기본 $CTF_SEEDS_ROOT/rev)
+  CTF_WEB_SOURCE      web 기본 원본 루트(기본 $CTF_SEEDS_ROOT/web)
   CTF_CRYPTO_SOURCE   crypto 기본 원본 루트
   CTF_FORENSICS_SOURCE forensics 기본 원본 루트
   CTF_BENCH_ROOT      결과 저장 루트(기본 <agent>/benchmarks)
@@ -158,12 +159,13 @@ script_path="$(readlink -f -- "${BASH_SOURCE[0]}")"
 script_dir="$(cd -- "$(dirname -- "$script_path")" && pwd)"
 default_agent_root="$(cd -- "$script_dir/../.." && pwd)"
 agent_root=${CTF_AGENT_ROOT:-$default_agent_root}
+seeds_root=${CTF_SEEDS_ROOT:-/mnt/c/Users/JW/Desktop/agents/ctf_seeds}
 case "$category" in
-  pwn) source_root=${CTF_PWNABLE_SOURCE:-$HOME/ctf-challenges/pwnable} ;;
-  rev) source_root=${CTF_REV_SOURCE:-$HOME/ctf-challenges/rev} ;;
-  web) source_root=${CTF_WEB_SOURCE:-$HOME/ctf-challenges/web} ;;
-  crypto) source_root=${CTF_CRYPTO_SOURCE:-$HOME/ctf-challenges/crypto} ;;
-  forensics) source_root=${CTF_FORENSICS_SOURCE:-$HOME/ctf-challenges/forensics} ;;
+  pwn) source_root=${CTF_PWNABLE_SOURCE:-$seeds_root/pwn} ;;
+  rev) source_root=${CTF_REV_SOURCE:-$seeds_root/rev} ;;
+  web) source_root=${CTF_WEB_SOURCE:-$seeds_root/web} ;;
+  crypto) source_root=${CTF_CRYPTO_SOURCE:-$seeds_root/crypto} ;;
+  forensics) source_root=${CTF_FORENSICS_SOURCE:-$seeds_root/forensics} ;;
 esac
 bench_root=${CTF_BENCH_ROOT:-$agent_root/benchmarks}
 metrics_py="$script_dir/ctf-bench-metrics.py"
@@ -393,7 +395,7 @@ declare -A docker_image_baseline=()
 snapshot_benchmark_docker_resources() {
   local resource_id
   command -v docker >/dev/null 2>&1 || return 0
-  docker info >/dev/null 2>&1 || return 0
+  timeout 5s docker version --format '{{.Server.Version}}' >/dev/null 2>&1 || return 0
   docker_tracking=true
   shared_image_id_before=$(docker image inspect --format '{{.Id}}' "$shared_image" 2>/dev/null || true)
   while IFS= read -r resource_id; do
@@ -406,7 +408,7 @@ snapshot_benchmark_docker_resources() {
 
 cleanup_benchmark_docker_resources() {
   [[ "$docker_tracking" == true ]] || return 0
-  docker info >/dev/null 2>&1 || return 0
+  timeout 5s docker version --format '{{.Server.Version}}' >/dev/null 2>&1 || return 0
 
   local resource_id current_shared_image_id removed_containers=0 removed_images=0
   local -a current_containers=() current_images=()

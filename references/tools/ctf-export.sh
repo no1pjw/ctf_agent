@@ -112,6 +112,7 @@ copy_items=(
   sandbox
   shimes
   web-agent
+  writeup-agent
   install-wsl.sh
   README.md
 )

@@ -17,7 +17,8 @@ usage() {
   --keep-docker 풀이 종료 후 문제 컨테이너와 이미지를 보존
   --keep-workspace  풀이 완료 후에도 중복 입력과 실행 로그를 보존
   --extra-prompt  실행 직전에 여러 줄 추가 지시 입력(.end로 종료)
-  --verbose     상세 Codex TUI와 준비 로그 표시(기본: 최종 결과만 출력)
+  --no-skill    SKILL.md와 프로젝트 AGENTS.md를 주입하지 않고 풀이
+  --verbose     진행 멘트에 더해 Codex 명령과 도구 결과도 상세 출력
   --dry-run     경로, 모드, 권한 및 생성 프롬프트만 표시
   --prepare-only  Codex 실행 없이 파일 복사 및 작업 디렉터리 준비
 
@@ -27,13 +28,15 @@ usage() {
   예: ctf-pwn cherry host3.dreamhack.games:12345
 
 환경 변수:
-  CTF_PWNABLE_SOURCE  문제 폴더 또는 ZIP이 있는 원본 디렉터리
+  CTF_SEEDS_ROOT      공통 문제 루트(기본 /mnt/c/Users/JW/Desktop/agents/ctf_seeds)
+  CTF_PWNABLE_SOURCE  pwn 문제 폴더 또는 ZIP이 있는 원본 디렉터리
   CTF_AGENT_ROOT      설치된 ctf-agent 루트
   CODEX_BIN           Codex CLI의 명시적 경로
   CTF_MIN_HOST_FREE_MB 실행 전 필요한 Windows 호스트 최소 여유 공간(MiB, 기본 4096)
   CTF_CODEX_MODEL     문제 풀이 모델(기본 gpt-5.6-sol)
   CTF_CODEX_REASONING_EFFORT  추론 강도(기본 max)
   CTF_CODEX_SERVICE_TIER  서비스 티어(기본 fast)
+  CTF_USE_SKILL       false면 --no-skill과 동일(기본 true)
   CTF_EXTRA_PROMPT   대화형 입력 없이 추가할 공통 프롬프트
 EOF
 }
@@ -46,6 +49,7 @@ keep_docker=false
 keep_workspace=false
 ask_extra_prompt=false
 quiet_output=true
+skill_enabled=${CTF_USE_SKILL:-true}
 challenge_name=
 remote_host=
 remote_port=
@@ -58,6 +62,8 @@ while [[ $# -gt 0 ]]; do
     --keep-docker) keep_docker=true ;;
     --keep-workspace) keep_workspace=true ;;
     --extra-prompt) ask_extra_prompt=true ;;
+    --no-skill) skill_enabled=false ;;
+    --skill) skill_enabled=true ;;
     --verbose) quiet_output=false ;;
     --fast-only) solve_mode=fast-only ;;
     --deep) solve_mode=deep ;;
@@ -70,6 +76,12 @@ while [[ $# -gt 0 ]]; do
   esac
   shift
 done
+
+case "$skill_enabled" in
+  true|1|yes|on) skill_enabled=true ;;
+  false|0|no|off) skill_enabled=false ;;
+  *) printf 'CTF_USE_SKILL은 true 또는 false여야 합니다: %s\n' "$skill_enabled" >&2; exit 65 ;;
+esac
 
 case ${#positionals[@]} in
   1)
@@ -115,8 +127,14 @@ if [[ ! "$challenge_name" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || [[ "$challenge_n
   exit 65
 fi
 
-source_root=${CTF_PWNABLE_SOURCE:-$HOME/ctf-challenges/pwnable}
+seeds_root=${CTF_SEEDS_ROOT:-/mnt/c/Users/JW/Desktop/agents/ctf_seeds}
+source_root=${CTF_PWNABLE_SOURCE:-$seeds_root/pwn}
 agent_root=${CTF_AGENT_ROOT:-$HOME/workspace/CTF/ctf-agent}
+export DOCKER_CONFIG=${CTF_DOCKER_CONFIG:-$agent_root/state/docker-config}
+mkdir -p "$DOCKER_CONFIG"
+[[ -f "$DOCKER_CONFIG/config.json" ]] || printf '{"auths":{}}\n' > "$DOCKER_CONFIG/config.json"
+docker_desktop_cli=/mnt/wsl/docker-desktop/cli-tools/usr/bin
+[[ ! -x "$docker_desktop_cli/docker" ]] || export PATH="$docker_desktop_cli:$PATH"
 sandbox_mode=danger-full-access
 approval_policy=never
 source_dir="$source_root/$challenge_name"
@@ -127,8 +145,10 @@ work_dir="$challenge_dir/work"
 evidence_dir="$challenge_dir/evidence"
 scope_dir="$challenge_dir/scope"
 tools_dir="$agent_root/references/tools"
+token_usage_tool="$tools_dir/ctf-token-usage.py"
 elapsed_timer_tool="$tools_dir/ctf-elapsed-timer.sh"
 extra_prompt_tool="$tools_dir/ctf-extra-prompt.sh"
+no_skill_tool="$tools_dir/ctf-no-skill.sh"
 runtime_tool="$tools_dir/pwn-runtime-prepare.sh"
 intake_tool="$tools_dir/pwn-intake-check.sh"
 process_cleanup_tool="$tools_dir/pwn-process-cleanup.sh"
@@ -164,7 +184,7 @@ source "$elapsed_timer_tool"
 }
 if [[ -f "$source_dir/Dockerfile" || -f "$input_dir/Dockerfile" ]]; then
   runtime_mode=supplied-docker
-elif docker image inspect "$image_name" >/dev/null 2>&1; then
+elif timeout 10s docker image inspect "$image_name" >/dev/null 2>&1; then
   runtime_mode=cached-docker
 else
   runtime_mode=static-only
@@ -175,6 +195,15 @@ fi
 [[ -x "$intake_tool" ]] || { printf 'pwn intake 점검 도구가 없습니다: %s\n' "$intake_tool" >&2; exit 66; }
 [[ -x "$process_cleanup_tool" ]] || { printf 'pwn process 정리 도구가 없습니다: %s\n' "$process_cleanup_tool" >&2; exit 66; }
 [[ -x "$extra_prompt_tool" ]] || { printf '공통 추가 프롬프트 도구가 없습니다: %s\n' "$extra_prompt_tool" >&2; exit 66; }
+[[ -x "$token_usage_tool" ]] || { printf '토큰 집계 도구가 없습니다: %s\n' "$token_usage_tool" >&2; exit 66; }
+if [[ "$skill_enabled" == false ]]; then
+  [[ -r "$no_skill_tool" ]] || { printf 'no-skill 실행 도구가 없습니다: %s\n' "$no_skill_tool" >&2; exit 66; }
+  source "$no_skill_tool"
+  ctf_no_skill_codex_args "$agent_root"
+  codex_context_args=("${CTF_NO_SKILL_CODEX_ARGS[@]}")
+else
+  codex_context_args=()
+fi
 [[ -d "$source_dir" || -f "$source_zip" ]] || {
   printf '문제를 찾을 수 없습니다. 다음 중 하나가 필요합니다:\n  %s\n  %s\n' "$source_dir" "$source_zip" >&2
   exit 67
@@ -192,7 +221,6 @@ else
   extra_prompt=$("$extra_prompt_tool")
 fi
 
-# Shared safety and solve rules live in AGENTS.md and the injected pwn skill.
 case "$runtime_mode" in
   supplied-docker)
     compact_runtime="하니스와 이미지 $image_name을 사용하라."
@@ -209,10 +237,18 @@ case "$runtime_mode" in
     ;;
 esac
 
+skill_invocation=
+no_skill_contract=
+if [[ "$skill_enabled" == true ]]; then
+  skill_invocation='$ctf-pwn'
+else
+  no_skill_contract='분야 지침·feedback·playbook 파일은 열지 마라. 입력 원본을 수정하지 말고 신뢰할 수 없는 파일은 호스트에서 실행하지 마라. 제공된 scope와 references/tools의 격리 하니스만 사용하며, 외부 웹 검색·write-up·scoreboard·범위 밖 네트워크·서브에이전트는 금지한다.'
+fi
 prompt=$(cat <<EOF
-\$ctf-pwn
+$skill_invocation
 허가된 '$challenge_name'을 즉시 풀어라. input=challenges/$challenge_name/input, mode=$solve_mode, runtime=$runtime_mode.
-$compact_runtime 진행 설명·웹·host 실행·제출·flag 전 writeup 없이 최단 체인과 work/solve.py만 사용하라.
+$compact_runtime 웹·host 실행·제출·flag 전 writeup 없이 최단 체인과 work/solve.py만 사용하라. 작업 시작, 분석 대상 변경, 로컬 검증, 원격 검증, 장시간 대기 시작 때 현재 하는 일과 다음 행동을 한국어 1~2문장으로 즉시 알려라. 같은 상태를 반복 설명하지 마라.
+$no_skill_contract
 검증 즉시 FLAG=<값>과 원격이면 획득 시간을 출력하고 .solved=verified 후 종료하라. 실패는 BLOCKED=<이유> 한 줄만 출력하라.
 EOF
 )
@@ -222,7 +258,7 @@ if [[ "$keep_docker" == true ]]; then
 fi
 
 if [[ -n "$remote_host" ]]; then
-  prompt+=$'\n공식 원격은 TCP '"$remote_host:$remote_port"$'만 허용한다. 새 로컬 성공 또는 실질적 수정 직후 pwn-remote-run.sh로 동기화하고, 변경 없는 반복·brute force·flood는 금지한다.'
+  prompt+=$'\n공식 원격은 TCP '"$remote_host:$remote_port"$'만 허용한다. 새 로컬 성공 또는 실질적 수정 직후 pwn-remote-run.sh로 동기화하고, 변경 없는 반복·brute force·flood는 금지한다. 원격 후보가 CTF_LOCAL_FLAG_DENYLIST의 로컬 placeholder와 같으면 성공으로 보고하지 마라.'
 else
   prompt+=$'\n- 원격 범위: 미지정이므로 모든 대상 네트워크 접속 금지'
 fi
@@ -256,6 +292,7 @@ if [[ "$action" == dry-run ]]; then
     printf 'Docker 종료 정리: 보존\n'
   fi
   printf '감사 로그:        %s\n' "$audit_enabled"
+  printf '분야 스킬:        %s\n' "$([[ "$skill_enabled" == true ]] && printf '사용' || printf '미사용')"
   printf 'Codex 샌드박스:   %s\n' "$sandbox_mode"
   printf '승인 정책:        %s\n' "$approval_policy"
   printf 'Codex 모델:       %s\n' "$codex_model"
@@ -303,11 +340,21 @@ else
 fi
 if [[ -d "$source_dir" ]]; then
   printf '%s\n' "$source_dir" > "$scope_dir/source-path.txt"
-  cp -a --update=none -- "$source_dir"/. "$input_dir"/
+  cp -an -- "$source_dir"/. "$input_dir"/
 else
   printf '%s\n' "$source_zip" > "$scope_dir/source-path.txt"
-  cp -a --update=none -- "$source_zip" "$input_dir"/
+  cp -an -- "$source_zip" "$input_dir"/
 fi
+local_flag_denylist="$work_dir/local-placeholder-flags.txt"
+: > "$local_flag_denylist"
+while IFS= read -r -d '' local_flag_source; do
+  grep -aoE '[A-Za-z][A-Za-z0-9_]{0,31}\{[^{}[:cntrl:]]{1,256}\}' "$local_flag_source" 2>/dev/null || true
+done < <(find "$input_dir" -maxdepth 3 -type f \( -iname 'flag' -o -iname 'flag.*' -o -iname '*sample*flag*' \) -size -64k -print0 2>/dev/null) \
+  | sort -u > "$local_flag_denylist"
+chmod 600 "$local_flag_denylist"
+export CTF_LOCAL_FLAG_DENYLIST="$local_flag_denylist"
+export CTF_PWN_SOLVED_MARKER="$work_dir/.solved"
+export CTF_PWN_REMOTE_PLACEHOLDER_MARKER="$work_dir/.remote-placeholder-rejected"
 if [[ "$quiet_output" == false || "$audit_enabled" == true ]]; then
   printf '문제 준비 완료: %s\n' "$challenge_dir"
 fi
@@ -336,6 +383,10 @@ fi
 if [[ ! -f "$work_dir/state.json" && -x "$tools_dir/pwn-checkpoint.sh" ]]; then
   CTF_AGENT_ROOT="$agent_root" "$tools_dir/pwn-checkpoint.sh" "$challenge_name" setup active "mode=$solve_mode runtime=$runtime_mode" >/dev/null
 fi
+if [[ "$action" == prepare-only && ${CTF_PREPARE_STATIC_ONLY:-false} == true ]]; then
+  printf 'Claude handoff용 정적 준비 완료: %s\n' "$challenge_dir"
+  exit 0
+fi
 
 audit_dir=
 if [[ "$audit_enabled" == true ]]; then
@@ -348,7 +399,7 @@ if [[ "$audit_enabled" == true ]]; then
   printf '%s\n' "$prompt" > "$audit_dir/prompt.txt"
   {
     printf 'run_id=%s\nstarted_utc=%s\nchallenge=%s\n' "$run_id" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$challenge_name"
-    printf 'solve_mode=%s\nrebuild=%s\nruntime_mode=%s\nsandbox=%s\napproval=%s\n' "$solve_mode" "$rebuild" "$runtime_mode" "$sandbox_mode" "$approval_policy"
+    printf 'solve_mode=%s\nrebuild=%s\nruntime_mode=%s\nsandbox=%s\napproval=%s\nskill_enabled=%s\n' "$solve_mode" "$rebuild" "$runtime_mode" "$sandbox_mode" "$approval_policy" "$skill_enabled"
     if [[ -n "$remote_host" ]]; then
       printf 'target_network=exact-endpoint-only\ntarget_host=%s\ntarget_port=%s\n' "$remote_host" "$remote_port"
     else
@@ -360,8 +411,10 @@ if [[ "$audit_enabled" == true ]]; then
       sed -n '/^runtime_status=/p;/^runtime_source=/p;/^pair_status=/p' "$runtime_manifest"
     fi
   } > "$audit_dir/run-info.txt"
-  find "$agent_root/.agents" "$agent_root/pwn-agent" "$agent_root/rules" "$agent_root/shimes" -type f -print | sort > "$audit_dir/available-role-files.txt"
-  if "$codex_bin" -C "$agent_root" debug prompt-input "$prompt" > "$audit_dir/prompt-input.json" 2> "$audit_dir/prompt-input.stderr.log"; then
+  audit_context_roots=("$agent_root/.agents" "$agent_root/rules" "$agent_root/shimes")
+  [[ "$skill_enabled" == false ]] || audit_context_roots+=("$agent_root/pwn-agent")
+  find "${audit_context_roots[@]}" -type f -print | sort > "$audit_dir/available-role-files.txt"
+  if "$codex_bin" -C "$agent_root" "${codex_context_args[@]}" debug prompt-input "$prompt" > "$audit_dir/prompt-input.json" 2> "$audit_dir/prompt-input.stderr.log"; then
     echo 'prompt_input_capture=ok' >> "$audit_dir/run-info.txt"
   else
     echo 'prompt_input_capture=failed' >> "$audit_dir/run-info.txt"
@@ -437,7 +490,7 @@ runtime_scalar() {
 }
 
 runtime_status=$(runtime_scalar runtime_status)
-if [[ "$runtime_status" != ready && $build_status -eq 0 ]] && docker image inspect "$image_name" >/dev/null 2>&1; then
+if [[ "$runtime_status" != ready && $build_status -eq 0 ]] && timeout 10s docker image inspect "$image_name" >/dev/null 2>&1; then
   set +e
   if [[ "$audit_enabled" == true ]]; then
     "$runtime_tool" --input "$input_dir" --output "$runtime_output" --image "$image_name" 2>&1 | tee "$audit_dir/runtime-prepare.log"
@@ -511,7 +564,7 @@ if [[ "$action" == prepare-only ]]; then
 fi
 
 set +e
-if [[ $build_status -eq 0 ]] && docker image inspect "$image_name" >/dev/null 2>&1; then
+if [[ $build_status -eq 0 ]] && timeout 10s docker image inspect "$image_name" >/dev/null 2>&1; then
   if [[ "$audit_enabled" == true ]]; then
     "$tools_dir/pwn-env-preflight.sh" --image "$image_name" 2>&1 | tee "$audit_dir/preflight.log"
     preflight_status=${PIPESTATUS[0]}
@@ -539,50 +592,38 @@ set -e
 [[ -n "$codex_bin" ]] || { echo 'Codex CLI를 사용할 수 없습니다.' >&2; exit 69; }
 process_run_id="ctf-$challenge_name-$(date -u +%Y%m%dT%H%M%SZ)-$$"
 export CTF_PWN_RUN_ID="$process_run_id"
-if [[ "$audit_enabled" == true ]]; then
-  log_config="log_dir=\"$audit_dir/tui\""
-  set +e
-  "$codex_bin" -C "$agent_root" --model "$codex_model" \
-    -c "model_reasoning_effort=\"$codex_reasoning_effort\"" \
-    -c "service_tier=\"$codex_service_tier\"" --enable fast_mode \
-    "${codex_offline_args[@]}" \
-    --sandbox "$sandbox_mode" --ask-for-approval "$approval_policy" -c "$log_config" "$prompt"
-  codex_status=$?
-  set -e
-  printf 'finished_utc=%s\ncodex_exit_status=%s\nstatus=finished\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$codex_status" >> "$audit_dir/run-info.txt"
-  exit "$codex_status"
-fi
-
 if [[ "$quiet_output" == true ]]; then
   if [[ -n "$remote_host" ]]; then
     ctf_elapsed_start "CTF pwn 실행 중: $challenge_name -> $remote_host:$remote_port"
   else
     ctf_elapsed_start "CTF pwn 실행 중: $challenge_name"
   fi
-  codex_stderr=$(mktemp "${TMPDIR:-/tmp}/ctf-pwn-${challenge_name}.XXXXXX.log")
-  set +e
-  "$codex_bin" exec --ephemeral --skip-git-repo-check -C "$agent_root" \
-    --model "$codex_model" -c "model_reasoning_effort=\"$codex_reasoning_effort\"" \
-    -c "service_tier=\"$codex_service_tier\"" --enable fast_mode \
-    "${codex_offline_args[@]}" --sandbox "$sandbox_mode" \
-    -c "approval_policy=\"$approval_policy\"" "$prompt" 2>"$codex_stderr"
-  codex_status=$?
-  set -e
-  ctf_elapsed_stop
-  if [[ $codex_status -ne 0 ]]; then
-    printf 'Codex 실행 실패(status=%s):\n' "$codex_status" >&2
-    tail -n 20 "$codex_stderr" >&2
-  fi
-  rm -f -- "$codex_stderr"
-  exit "$codex_status"
 fi
 
+token_args=()
+[[ "$quiet_output" == true ]] || token_args+=(--verbose)
+[[ -z ${CTF_USAGE_SUMMARY_FILE:-} ]] || token_args+=(--summary "$CTF_USAGE_SUMMARY_FILE")
+if [[ "$audit_enabled" == true ]]; then
+  token_args+=(--events "$audit_dir/codex-events.jsonl")
+fi
+codex_stderr=$(mktemp "${TMPDIR:-/tmp}/ctf-pwn-${challenge_name}.XXXXXX.log")
 set +e
-"$codex_bin" -C "$agent_root" --model "$codex_model" \
-  -c "model_reasoning_effort=\"$codex_reasoning_effort\"" \
+"$codex_bin" exec --ephemeral --skip-git-repo-check -C "$agent_root" \
+  --model "$codex_model" -c "model_reasoning_effort=\"$codex_reasoning_effort\"" \
   -c "service_tier=\"$codex_service_tier\"" --enable fast_mode \
-  "${codex_offline_args[@]}" \
-  --sandbox "$sandbox_mode" --ask-for-approval "$approval_policy" "$prompt"
-codex_status=$?
+  "${codex_context_args[@]}" \
+  "${codex_offline_args[@]}" --sandbox "$sandbox_mode" \
+  -c "approval_policy=\"$approval_policy\"" --json "$prompt" 2>"$codex_stderr" \
+  | python3 "$token_usage_tool" "${token_args[@]}"
+codex_status=${PIPESTATUS[0]}
 set -e
+[[ "$quiet_output" == false ]] || ctf_elapsed_stop true
+if [[ $codex_status -ne 0 ]]; then
+  printf 'Codex 실행 실패(status=%s):\n' "$codex_status" >&2
+  tail -n 20 "$codex_stderr" >&2
+fi
+rm -f -- "$codex_stderr"
+if [[ "$audit_enabled" == true ]]; then
+  printf 'finished_utc=%s\ncodex_exit_status=%s\nstatus=finished\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$codex_status" >> "$audit_dir/run-info.txt"
+fi
 exit "$codex_status"

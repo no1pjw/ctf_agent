@@ -20,7 +20,8 @@ usage() {
   --keep-docker     종료 후 Web 컨테이너·Compose 프로젝트를 보존
   --keep-workspace  완료 후에도 중복 입력 파일을 보존
   --extra-prompt    실행 직전에 여러 줄 추가 지시 입력(.end로 종료)
-  --verbose         상세 Codex TUI와 준비 로그 표시(기본: 최종 결과만 출력)
+  --no-skill        SKILL.md와 프로젝트 AGENTS.md를 주입하지 않고 풀이
+  --verbose         진행 멘트에 더해 Codex 명령과 도구 결과도 상세 출력
   --prepare-only    문제 파일만 준비하고 서비스와 Codex는 실행하지 않음
   --dry-run         경로·런타임 우선순위·Codex 프롬프트만 표시
   -h, --help        도움말
@@ -31,13 +32,15 @@ usage() {
   3. 둘 다 없으면 STATIC-ONLY 소스 분석
 
 환경 변수:
-  CTF_WEB_SOURCE       기본 Web 문제 원본 디렉터리
+  CTF_SEEDS_ROOT       공통 문제 루트(기본 /mnt/c/Users/JW/Desktop/agents/ctf_seeds)
+  CTF_WEB_SOURCE       Web 원본 루트(기본 $CTF_SEEDS_ROOT/web)
   CTF_AGENT_ROOT       설치된 ctf-agent 루트
   CTF_MIN_HOST_FREE_MB Windows 호스트 최소 여유 공간(MiB, 기본 4096)
   CODEX_BIN            Codex CLI 경로
   CTF_CODEX_MODEL      문제 풀이 모델(기본 gpt-5.6-sol)
   CTF_CODEX_REASONING_EFFORT 추론 강도(기본 max)
   CTF_CODEX_SERVICE_TIER 서비스 티어(기본 fast)
+  CTF_USE_SKILL        false면 --no-skill과 동일(기본 true)
   CTF_EXTRA_PROMPT     대화형 입력 없이 추가할 공통 프롬프트
 EOF
 }
@@ -48,7 +51,9 @@ keep_docker=false
 keep_workspace=false
 ask_extra_prompt=false
 quiet_output=true
-source_root=${CTF_WEB_SOURCE:-$HOME/ctf-challenges/web}
+skill_enabled=${CTF_USE_SKILL:-true}
+seeds_root=${CTF_SEEDS_ROOT:-/mnt/c/Users/JW/Desktop/agents/ctf_seeds}
+source_root=${CTF_WEB_SOURCE:-$seeds_root/web}
 container_port=
 challenge_name=
 target_url=
@@ -78,6 +83,8 @@ while [[ $# -gt 0 ]]; do
     --keep-docker) keep_docker=true ;;
     --keep-workspace) keep_workspace=true ;;
     --extra-prompt) ask_extra_prompt=true ;;
+    --no-skill) skill_enabled=false ;;
+    --skill) skill_enabled=true ;;
     --verbose) quiet_output=false ;;
     --prepare-only) action=prepare-only ;;
     --dry-run) action=dry-run ;;
@@ -96,6 +103,12 @@ while [[ $# -gt 0 ]]; do
   esac
   shift
 done
+
+case "$skill_enabled" in
+  true|1|yes|on) skill_enabled=true ;;
+  false|0|no|off) skill_enabled=false ;;
+  *) printf 'CTF_USE_SKILL은 true 또는 false여야 합니다: %s\n' "$skill_enabled" >&2; exit 65 ;;
+esac
 
 [[ -n "$challenge_name" ]] || { usage >&2; exit 64; }
 if [[ ! "$challenge_name" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || [[ "$challenge_name" == . || "$challenge_name" == .. ]]; then
@@ -138,6 +151,11 @@ if [[ -n "$container_port" ]]; then
 fi
 
 agent_root=${CTF_AGENT_ROOT:-$HOME/workspace/CTF/ctf-agent}
+export DOCKER_CONFIG=${CTF_DOCKER_CONFIG:-$agent_root/state/docker-config}
+mkdir -p "$DOCKER_CONFIG"
+[[ -f "$DOCKER_CONFIG/config.json" ]] || printf '{"auths":{}}\n' > "$DOCKER_CONFIG/config.json"
+docker_desktop_cli=/mnt/wsl/docker-desktop/cli-tools/usr/bin
+[[ ! -x "$docker_desktop_cli/docker" ]] || export PATH="$docker_desktop_cli:$PATH"
 source_dir="$source_root/$challenge_name"
 source_zip="$source_root/$challenge_name.zip"
 challenge_dir="$agent_root/challenges/$challenge_name"
@@ -146,10 +164,12 @@ work_dir="$challenge_dir/work"
 scope_dir="$challenge_dir/scope"
 evidence_dir="$challenge_dir/evidence/private"
 tools_dir="$agent_root/references/tools"
+token_usage_tool="$tools_dir/ctf-token-usage.py"
 elapsed_timer_tool="$tools_dir/ctf-elapsed-timer.sh"
 runtime_tool="$tools_dir/web-runtime.sh"
 runtime_state="$work_dir/web-runtime.env"
 extra_prompt_tool="$tools_dir/ctf-extra-prompt.sh"
+no_skill_tool="$tools_dir/ctf-no-skill.sh"
 codex_bin=${CODEX_BIN:-}
 codex_model=${CTF_CODEX_MODEL:-gpt-5.6-sol}
 if [[ -n ${CTF_CODEX_REASONING_EFFORT:-} ]]; then
@@ -168,6 +188,15 @@ project_name="ctf_web_${image_slug//-/_}"
 [[ -f "$tools_dir/web-blackbox-probe.py" ]] || { echo 'Web black-box probe가 없습니다.' >&2; exit 66; }
 [[ -f "$tools_dir/web-request.py" ]] || { echo 'Web exact-origin request 도구가 없습니다.' >&2; exit 66; }
 [[ -x "$extra_prompt_tool" ]] || { echo '공통 추가 프롬프트 도구가 없습니다.' >&2; exit 66; }
+[[ -x "$token_usage_tool" ]] || { echo '토큰 집계 도구가 없습니다.' >&2; exit 66; }
+if [[ "$skill_enabled" == false ]]; then
+  [[ -r "$no_skill_tool" ]] || { printf 'no-skill 실행 도구가 없습니다: %s\n' "$no_skill_tool" >&2; exit 66; }
+  source "$no_skill_tool"
+  ctf_no_skill_codex_args "$agent_root"
+  codex_context_args=("${CTF_NO_SKILL_CODEX_ARGS[@]}")
+else
+  codex_context_args=()
+fi
 [[ -d "$source_dir" || -f "$source_zip" || -n "$target_url" ]] || {
   printf '문제를 찾을 수 없습니다:\n  %s\n  %s\n' "$source_dir" "$source_zip" >&2
   exit 67
@@ -218,11 +247,19 @@ case "$solve_mode" in
   deep) mode_text='확인한 단계를 반복하지 말고 flag 관련 경로만 확장하라.' ;;
 esac
 
+skill_invocation=
+no_skill_contract=
+if [[ "$skill_enabled" == true ]]; then
+  skill_invocation='$ctf-web'
+else
+  no_skill_contract='분야 지침·feedback·playbook 파일은 열지 마라. 입력 원본을 수정하지 말고 서버 실행은 준비된 Docker 하니스 안에서만 수행하라. scope/web-scope.env의 정확한 origin과 제공된 probe/request 도구만 사용하며 외부 검색·범위 밖 네트워크·서브에이전트는 금지한다.'
+fi
 prompt=$(cat <<EOF
-\$ctf-web
+$skill_invocation
 허가된 Web CTF '$challenge_name'을 즉시 풀어라. input=challenges/$challenge_name/input, mode=$solve_mode, runtime=$runtime_mode:$runtime_file.
 scope/web-scope.env의 origin만 사용하라. 소스가 없으면 CTF_WEB_PROBE로 entry를 1회 map하고, 후속 단일 요청은 CTF_WEB_REQUEST로 기록한 뒤 관찰된 route만 좁게 시험하라. 최단 flag 경로와 최소 work/solve.py가 목표다.
-진행 설명·외부 웹·broad scan·wordlist brute force·DoS·외부 callback·writeup은 금지한다.
+외부 웹·broad scan·wordlist brute force·DoS·외부 callback·writeup은 금지한다. 작업 시작, route·상태 분석 전환, 로컬 검증, 허가된 원격 검증, 장시간 대기 시작 때 현재 하는 일과 다음 행동을 한국어 1~2문장으로 즉시 알려라. 같은 상태를 반복 설명하지 마라.
+$no_skill_contract
 $mode_text 검증 즉시 FLAG=<값>, .solved=verified 후 종료하고 실패는 BLOCKED=<이유> 한 줄만 출력하라.
 EOF
 )
@@ -249,6 +286,7 @@ if [[ "$action" == dry-run ]]; then
   printf '허용 origin:     %s\n' "${target_origin:-준비된 loopback origin}"
   printf '풀이 모드:       %s\n' "$solve_mode"
   printf '런타임 우선 결과: %s (%s)\n' "$runtime_mode" "$runtime_file"
+  printf '분야 스킬:       %s\n' "$([[ "$skill_enabled" == true ]] && printf '사용' || printf '미사용')"
   printf 'Docker 이미지:   %s\n' "$image_name"
   printf 'Compose 프로젝트: %s\n' "$project_name"
   printf '컨테이너 포트:   %s\n' "${container_port:-Docker 설정에서 자동 감지}"
@@ -275,7 +313,7 @@ mkdir -p "$input_dir" "$work_dir" "$scope_dir" "$evidence_dir"
 printf 'web\n' > "$challenge_dir/.ctf-category"
 if [[ -d "$source_dir" ]]; then
   printf '%s\n' "$source_dir" > "$scope_dir/source-path.txt"
-  cp -a --update=none -- "$source_dir"/. "$input_dir"/
+  cp -an -- "$source_dir"/. "$input_dir"/
 elif [[ -f "$source_zip" ]]; then
   command -v unzip >/dev/null 2>&1 || { echo 'ZIP 문제 준비에는 unzip이 필요합니다.' >&2; exit 69; }
   printf '%s\n' "$source_zip" > "$scope_dir/source-path.txt"
@@ -311,7 +349,7 @@ else
   printf 'authorization=user-supplied-local-ctf-artifact\ntarget_network=loopback-only\nruntime_mode=%s\nruntime_file=%s\n' \
     "$runtime_mode" "$runtime_file" > "$scope_dir/web-scope.env"
 fi
-cp -a --update=none -- "$tools_dir/web-solve-template.py" "$work_dir/solve.py"
+cp -an -- "$tools_dir/web-solve-template.py" "$work_dir/solve.py"
 [[ "$quiet_output" == true ]] || printf 'Web 문제 준비 완료: %s\n' "$challenge_dir"
 
 [[ "$action" != prepare-only ]] || exit 0
@@ -414,28 +452,23 @@ offline_args=(
 set +e
 if [[ "$quiet_output" == true ]]; then
   ctf_elapsed_start "CTF web 실행 중: $challenge_name"
-  codex_stderr=$(mktemp "${TMPDIR:-/tmp}/ctf-web-${challenge_name}.XXXXXX.log")
-  "$codex_bin" exec --ephemeral --skip-git-repo-check -C "$agent_root" \
-    --model "$codex_model" -c "model_reasoning_effort=\"$codex_reasoning_effort\"" \
-    -c "service_tier=\"$codex_service_tier\"" --enable fast_mode \
-    "${offline_args[@]}" --sandbox danger-full-access -c 'approval_policy="never"' \
-    "$prompt" 2>"$codex_stderr"
-  status=$?
-  ctf_elapsed_stop
-  if [[ $status -ne 0 ]]; then
-    printf 'Codex 실행 실패(status=%s):\n' "$status" >&2
-    tail -n 20 "$codex_stderr" >&2
-  fi
-  rm -f -- "$codex_stderr"
-  set -e
-  exit "$status"
 fi
-
-"$codex_bin" -C "$agent_root" --model "$codex_model" \
-  -c "model_reasoning_effort=\"$codex_reasoning_effort\"" \
+token_args=()
+[[ "$quiet_output" == true ]] || token_args+=(--verbose)
+[[ -z ${CTF_USAGE_SUMMARY_FILE:-} ]] || token_args+=(--summary "$CTF_USAGE_SUMMARY_FILE")
+codex_stderr=$(mktemp "${TMPDIR:-/tmp}/ctf-web-${challenge_name}.XXXXXX.log")
+"$codex_bin" exec --ephemeral --skip-git-repo-check -C "$agent_root" \
+  --model "$codex_model" -c "model_reasoning_effort=\"$codex_reasoning_effort\"" \
   -c "service_tier=\"$codex_service_tier\"" --enable fast_mode \
-  "${offline_args[@]}" \
-  --sandbox danger-full-access --ask-for-approval never "$prompt"
-status=$?
+  "${codex_context_args[@]}" \
+  "${offline_args[@]}" --sandbox danger-full-access -c 'approval_policy="never"' \
+  --json "$prompt" 2>"$codex_stderr" | python3 "$token_usage_tool" "${token_args[@]}"
+status=${PIPESTATUS[0]}
 set -e
+[[ "$quiet_output" == false ]] || ctf_elapsed_stop true
+if [[ $status -ne 0 ]]; then
+  printf 'Codex 실행 실패(status=%s):\n' "$status" >&2
+  tail -n 20 "$codex_stderr" >&2
+fi
+rm -f -- "$codex_stderr"
 exit "$status"

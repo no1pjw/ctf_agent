@@ -23,8 +23,15 @@ context=$1
 image=$2
 dockerfile="$context/Dockerfile"
 [[ -f "$dockerfile" ]] || { echo "Dockerfile not found: $dockerfile" >&2; exit 66; }
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+docker_ready_tool="$script_dir/ctf-docker-ready.sh"
 
-if [[ "$rebuild" == false ]] && docker image inspect "$image" >/dev/null 2>&1; then
+if ! "$docker_ready_tool"; then
+  echo 'Docker daemon 재시도 검사에 실패해 이미지 빌드를 건너뜁니다.' >&2
+  exit 69
+fi
+
+if [[ "$rebuild" == false ]] && timeout --kill-after=2s 15s docker image inspect "$image" >/dev/null 2>&1; then
   printf 'docker_image=cache-hit:%s\n' "$image"
   exit 0
 fi

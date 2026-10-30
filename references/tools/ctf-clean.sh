@@ -175,6 +175,9 @@ clean_challenge() {
   while IFS= read -r -d '' target; do
     remove_exact "$target" "$dir"
   done < <(find "$dir/work" -maxdepth 1 -type f \( -name core -o -name 'core.*' \) -print0 2>/dev/null)
+  while IFS= read -r -d '' target; do
+    remove_exact "$target" "$dir"
+  done < <(find "$dir/work" -maxdepth 1 -type f -name '.writeup-draft.*.md' -print0 2>/dev/null)
 
   if [[ "$apply" == true ]]; then
     printf 'compacted\n' > "$dir/work/.compacted"

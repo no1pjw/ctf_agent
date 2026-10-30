@@ -7,6 +7,9 @@ timeout_seconds=30
 attempts=1
 output_file=
 max_log_bytes=${CTF_REMOTE_LOG_MAX_BYTES:-1048576}
+local_flag_denylist=${CTF_LOCAL_FLAG_DENYLIST:-}
+solved_marker=${CTF_PWN_SOLVED_MARKER:-}
+placeholder_marker=${CTF_PWN_REMOTE_PLACEHOLDER_MARKER:-}
 
 usage() {
   echo "usage: $0 --host HOST --port PORT [--timeout SEC] [--attempts N] --output FILE -- COMMAND [ARG ...]"
@@ -46,6 +49,12 @@ monotonic_ns() {
   python3 -c 'import time; print(time.monotonic_ns())'
 }
 
+is_local_placeholder() {
+  local candidate=$1
+  [[ -n "$local_flag_denylist" && -f "$local_flag_denylist" ]] || return 1
+  grep -Fqx -- "$candidate" "$local_flag_denylist"
+}
+
 stream_remote_output() {
   local start_ns=$1
   local capture_file=$2
@@ -66,6 +75,11 @@ stream_remote_output() {
     fi
     flag_marker=$(printf '%s\n' "$line" | grep -aoE 'FLAG=[A-Za-z][A-Za-z0-9_]{0,31}\{[^{}[:cntrl:]]{1,256}\}' | tail -n 1 || true)
     if [[ "$flag_printed" == false && -n "$flag_marker" ]]; then
+      if is_local_placeholder "${flag_marker#FLAG=}"; then
+        printf '\n원격 후보가 로컬 placeholder와 일치하여 거부했습니다: %s\n' "${flag_marker#FLAG=}"
+        flag_printed=true
+        continue
+      fi
       if (( current_size + line_size > max_log_bytes )); then
         printf '%s\n' "$flag_marker" >> "$capture_file"
       fi
@@ -91,8 +105,22 @@ for ((attempt = 1; attempt <= attempts; attempt++)); do
   printf 'exit_status=%s\n' "$status" | tee -a "$output_file"
   flag_line="$(grep -aoE 'FLAG=[A-Za-z][A-Za-z0-9_]{0,31}\{[^{}[:cntrl:]]{1,256}\}' "$output_file" | tail -n 1 || true)"
   if [[ -n "$flag_line" ]]; then
-    status=0
-    break
+    if is_local_placeholder "${flag_line#FLAG=}"; then
+      status=75
+      if [[ -n "$placeholder_marker" ]]; then
+        mkdir -p "$(dirname -- "$placeholder_marker")"
+        printf '%s\n' "${flag_line#FLAG=}" > "$placeholder_marker"
+      fi
+      printf '로컬 placeholder와 동일한 원격 후보는 검증된 플래그로 인정하지 않습니다.\n' | tee -a "$output_file"
+    else
+      status=0
+      [[ -z "$placeholder_marker" ]] || rm -f -- "$placeholder_marker"
+      if [[ -n "$solved_marker" ]]; then
+        mkdir -p "$(dirname -- "$solved_marker")"
+        printf 'verified\n' > "$solved_marker"
+      fi
+      break
+    fi
   fi
   if [[ $status -eq 0 ]]; then
     status=74
